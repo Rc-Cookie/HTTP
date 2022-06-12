@@ -57,7 +57,7 @@
     <repository>
       <id>github</id>
       <name>Github Rc-Cookie Apache Maven Packages</name>
-      <url>https://maven.pkg.github.com/Rc-Cookie/http</url>
+      <url>https://maven.pkg.github.com/Rc-Cookie/HTTP</url>
     </repository>
   </distributionManagement>
 </project>

@@ -1,6 +1,5 @@
 package com.github.rccookie.http;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -11,7 +10,7 @@ import java.util.Map;
 import com.github.rccookie.json.Json;
 import com.github.rccookie.json.JsonElement;
 import com.github.rccookie.util.Future;
-import com.github.rccookie.util.FutureImpl;
+import com.github.rccookie.util.OnDemandFutureImpl;
 import com.github.rccookie.util.ThreadedFutureImpl;
 import com.github.rccookie.xml.Document;
 import com.github.rccookie.xml.XML;
@@ -29,7 +28,7 @@ public class HttpResponse {
      * Future to when the connection has been established and all data
      * has been sent to the server.
      */
-    private final FutureImpl<HttpURLConnection> connection;
+    private final Future<HttpURLConnection> connection;
     /**
      * A future to when the request data has been fully sent to the server.
      * Returns this http response instance. The response fields don't have
@@ -106,27 +105,20 @@ public class HttpResponse {
      * @param data The data to send, or null if no data should be sent
      */
     HttpResponse(@NotNull String url, @NotNull HttpRequest request, byte @Nullable [] data) {
-        FutureImpl<HttpResponse> sendingImpl = new ThreadedFutureImpl<>();
-        sending = sendingImpl;
-        connection = new ThreadedFutureImpl<>();
-        OnDemandFutureImpl.EXECUTOR.submit(() -> {
-            try {
-                HttpURLConnection con = (HttpURLConnection) new URL(url).openConnection();
-                con.setRequestMethod(request.method.toString());
-                con.setInstanceFollowRedirects(request.redirects);
-                request.header.forEach(con::setRequestProperty);
+        connection = new ThreadedFutureImpl<>(() -> {
+            HttpURLConnection con = (HttpURLConnection) new URL(url).openConnection();
+            con.setRequestMethod(request.method.toString());
+            con.setInstanceFollowRedirects(request.redirects);
+            request.header.forEach(con::setRequestProperty);
 
-                if(data != null) {
-                    con.setDoOutput(true);
-                    con.getOutputStream().write(data);
-                }
-
-                connection.complete(con);
-                sendingImpl.complete(this);
-            } catch (IOException e) {
-                sendingImpl.fail(e);
+            if(data != null) {
+                con.setDoOutput(true);
+                con.getOutputStream().write(data);
             }
+
+            return con;
         });
+        sending = connection.map(() -> this);
 
         code = new OnDemandFutureImpl<>(() -> connection.waitFor().getResponseCode());
         success = new OnDemandFutureImpl<>(() -> code.waitFor() < 400);

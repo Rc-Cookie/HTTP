@@ -1,3 +1,3 @@
 # RcCookie HTTP Library
 
-A simple http library designed for chained inline-calls.
+A simple http client and server library designed for chained inline-calls.

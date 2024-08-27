@@ -2,27 +2,29 @@ package de.rccookie.http.server;
 
 import java.net.InetSocketAddress;
 import java.net.URL;
+import java.util.NoSuchElementException;
 import java.util.function.Consumer;
 
 import de.rccookie.http.Body;
 import de.rccookie.http.Header;
 import de.rccookie.http.HttpRequest;
 import de.rccookie.http.HttpResponse;
+import de.rccookie.http.Method;
 import de.rccookie.http.ResponseCode;
 import de.rccookie.util.Arguments;
 import de.rccookie.util.Future;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-class SendNotificationRequest implements HttpRequest.Received {
+class SendNotificationRequest implements HttpRequest.Respondable {
 
-    private final Received request;
+    private final Respondable request;
     private final Consumer<? super HttpResponse.Sendable> beforeSend;
 
     private Resp response;
     private boolean sent = false;
 
-    SendNotificationRequest(Received request, Consumer<? super HttpResponse.Sendable> beforeSend) {
+    SendNotificationRequest(Respondable request, Consumer<? super HttpResponse.Sendable> beforeSend) {
         this.beforeSend = beforeSend;
         this.request = request;
     }
@@ -68,6 +70,11 @@ class SendNotificationRequest implements HttpRequest.Received {
     }
 
     @Override
+    public Object serverObject() {
+        return request.serverObject();
+    }
+
+    @Override
     public @Nullable HttpResponse.Sendable getResponse() {
         return response;
     }
@@ -76,6 +83,43 @@ class SendNotificationRequest implements HttpRequest.Received {
     public HttpResponse.Sendable respond(ResponseCode code) {
         return response = new Resp(this, request.respond(code));
     }
+
+    @Override
+    public Respondable invalidateResponse() {
+        return request.invalidateResponse();
+    }
+
+    @Override
+    public Respondable addResponseConfigurator(Consumer<? super HttpResponse.Editable> configurator) {
+        return request.addResponseConfigurator(configurator);
+    }
+
+    @Override
+    public Respondable clearResponseConfigurators() {
+        return request.clearResponseConfigurators();
+    }
+
+    @Override
+    public @NotNull Consumer<? super HttpResponse.Editable> getResponseConfigurators() {
+        return request.getResponseConfigurators();
+    }
+
+    @Override
+    public <T> Respondable bindOptionalParam(Class<T> type, T value) {
+        return request.bindOptionalParam(type, value);
+    }
+
+    @Override
+    public <T> T getOptionalParam(Class<T> type) throws NoSuchElementException {
+        return request.getOptionalParam(type);
+    }
+
+    @Override
+    public boolean hasOptionalParam(Class<?> type) {
+        return request.hasOptionalParam(type);
+    }
+
+
 
     private class Resp implements HttpResponse.Sendable {
 
@@ -133,7 +177,7 @@ class SendNotificationRequest implements HttpRequest.Received {
         }
 
         @Override
-        public @NotNull HttpRequest request() {
+        public @NotNull HttpRequest.Received request() {
             return request;
         }
 

@@ -1,6 +1,12 @@
 package de.rccookie.http;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -8,7 +14,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import de.rccookie.http.auth.AuthChallenge;
+import de.rccookie.http.header.RateLimit;
+import de.rccookie.http.useragent.UserAgent;
+import de.rccookie.json.Json;
 import de.rccookie.util.Arguments;
+import de.rccookie.util.Console;
+import de.rccookie.util.Utils;
+import de.rccookie.util.login.Login;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -18,6 +31,12 @@ import org.jetbrains.annotations.Nullable;
  * where duplicate keys are allowed.
  */
 public interface Header extends Map<String, Header.Values> {
+
+    int _init = init();
+    private static int init() {
+        Json.registerDeserializer(Header.class, json -> Header.of(json.asMap(String.class, Values.class)));
+        return 0;
+    }
 
     /**
      * Sets the value for the specified key of the header.
@@ -57,6 +76,16 @@ public interface Header extends Map<String, Header.Values> {
         Values v = computeIfAbsent(key, k -> new EditableHeader.EditableValues());
         v.add(value);
         return v;
+    }
+
+    default String setDate(@Nullable Instant date) {
+        if(date == null) {
+            remove("Date");
+            return null;
+        }
+        String str = date.atZone(ZoneId.of("GMT")).format(DateTimeFormatter.RFC_1123_DATE_TIME);
+        put("Date", str);
+        return str;
     }
 
     default String addCookie(@NotNull Cookie cookie) {
@@ -102,6 +131,79 @@ public interface Header extends Map<String, Header.Values> {
         return put("Accept", contentTypes.toString());
     }
 
+    default Values setUserAgent(@Nullable UserAgent userAgent) {
+        if(userAgent == null || userAgent == UserAgent.UNKNOWN)
+            return remove("User-Agent");
+        return put("User-Agent", userAgent.raw());
+    }
+
+    default Values setBasicAuth(String username, String password) {
+        Arguments.checkNull(username, "username");
+        Arguments.checkNull(password, "password");
+        if(username.contains(":"))
+            throw new IllegalArgumentException("Username must not contain ':'");
+        return put("Authorization", "Basic "+Utils.toBase64(username+":"+password));
+    }
+
+    default Values setBasicAuth(Login credentials) {
+        return setBasicAuth(Arguments.checkNull(credentials, "credentials").username, credentials.password);
+    }
+
+    default Values setAuthenticate(@Nullable List<? extends AuthChallenge> challenges) {
+        if(challenges == null || challenges.isEmpty())
+            return remove("WWW-Authenticate");
+        return put("WWW-Authenticate", mutableValues(challenges.stream().map(AuthChallenge::toString).collect(Collectors.toList())));
+    }
+
+    default Values addAuthenticate(AuthChallenge challenge) {
+        return add("WWW-Authenticate", Arguments.checkNull(challenge, "challenge").toString());
+    }
+
+    default Values setProxyAuthenticate(@Nullable List<? extends AuthChallenge> challenges) {
+        if(challenges == null || challenges.isEmpty())
+            return remove("Proxy-Authenticate");
+        return put("Proxy-Authenticate", mutableValues(challenges.stream().map(AuthChallenge::toString).collect(Collectors.toList())));
+    }
+
+    default Values addProxyAuthenticate(AuthChallenge challenge) {
+        return add("Proxy-Authenticate", Arguments.checkNull(challenge, "challenge").toString());
+    }
+
+    default Values setAge(@Nullable Integer age) {
+        return set("Age", age+"");
+    }
+
+    default void setRateLimit(@Nullable RateLimit rateLimit, @NotNull RateLimit.Naming naming) {
+        Arguments.checkNull(naming, "naming");
+        setRateLimit(rateLimit, naming.headerPrefix());
+    }
+
+    default void setRateLimit(@Nullable RateLimit rateLimit, @NotNull String namePrefix) {
+        Arguments.checkNull(namePrefix, "namePrefix");
+        if(rateLimit == null) {
+            remove(namePrefix+"-Limit");
+            remove(namePrefix+"-Remaining");
+            remove(namePrefix+"-Reset");
+        }
+        else {
+            set(namePrefix+"-Limit", rateLimit.limit()+"");
+            set(namePrefix+"-Remaining", rateLimit.remaining()+"");
+            set(namePrefix+"-Reset", Math.max(0, rateLimit.timeUntilReset().getSeconds())+"");
+        }
+    }
+
+    default Values setKeepAlive(@Nullable Boolean keepAlive) {
+        return setConnection(keepAlive);
+    }
+
+    default Values setConnection(@Nullable Boolean keepAlive) {
+        if(keepAlive == null)
+            return remove("Connection");
+        return set("Connection", keepAlive ? "Connection" : "close");
+    }
+
+
+
     /**
      * Returns the values for the given key joined with newlines, or <code>null</code> if
      * the header does not contain the given key.
@@ -126,6 +228,13 @@ public interface Header extends Map<String, Header.Values> {
         return values != null ? values.stream().map(Object::toString).collect(Collectors.joining("\n")) : def;
     }
 
+    default Instant getDate() {
+        Values values = get("Date");
+        if(values == null || values.isEmpty())
+            return null;
+        return ZonedDateTime.parse(values.get(0), DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+    }
+
     @NotNull
     default Map<String, Cookie> getCookies() {
         Values values = get("Cookie");
@@ -137,7 +246,15 @@ public interface Header extends Map<String, Header.Values> {
     default Map<String, Cookie> getSetCookies() {
         Values values = get("Set-Cookie");
         if(values == null) return Map.of();
-        return values.stream().map(Cookie::parseCookie).collect(Collectors.toMap(Cookie::name, c->c));
+        Map<String, Cookie> cookies = new HashMap<>();
+        for(String v : values) try {
+            Cookie c = Cookie.parseCookie(v);
+            cookies.put(c.name(), c);
+        } catch(Exception e) {
+            Console.warn("Failed to parse Set-Cookie: {}:", v);
+            Console.warn(e);
+        }
+        return cookies;
     }
 
     default ContentType getContentType() {
@@ -146,6 +263,7 @@ public interface Header extends Map<String, Header.Values> {
         return ContentType.of(contentType.get(0));
     }
 
+    @NotNull
     default ContentTypes getAccept() {
         Values accept = get("Accept");
         if(accept == null) return ContentTypes.ANY;
@@ -160,6 +278,96 @@ public interface Header extends Map<String, Header.Values> {
         }
         return ContentTypes.of(types);
     }
+
+    @NotNull
+    default UserAgent getUserAgent() {
+        Values userAgent = get("User-Agent");
+        return userAgent != null && !userAgent.isEmpty() ? new UserAgent(userAgent.get(0)) : UserAgent.UNKNOWN;
+    }
+
+    default Login getBasicAuth() {
+        Values auth = get("Authorization");
+        if(auth == null) return null;
+        String authStr = auth.get(0);
+        if(!authStr.startsWith("Basic ")) return null;
+        String str = Utils.fromBase64(authStr.substring(6));
+        int colon = str.indexOf(':');
+        if(colon < 0)
+            return new Login("", str);
+        return new Login(str.substring(0, colon), str.substring(colon + 1));
+    }
+
+    @NotNull
+    default List<AuthChallenge> getAuthenticate() {
+        Values auths = get("WWW-Authenticate");
+        if(auths == null) return List.of();
+        List<AuthChallenge> challenges = new ArrayList<>();
+        for(String auth : auths)
+            challenges.addAll(AuthChallenge.parse(auth));
+        return challenges;
+    }
+
+    default <C extends AuthChallenge> C getAuthenticate(Class<C> type) {
+        for(AuthChallenge c : getAuthenticate())
+            if(type.isInstance(c))
+                return type.cast(c);
+        return null;
+    }
+
+    @NotNull
+    default List<AuthChallenge> getProxyAuthenticate() {
+        Values auths = get("Proxy-Authenticate");
+        if(auths == null) return List.of();
+        List<AuthChallenge> challenges = new ArrayList<>();
+        for(String auth : auths)
+            challenges.addAll(AuthChallenge.parse(auth));
+        return challenges;
+    }
+
+    default <C extends AuthChallenge> C getProxyAuthenticate(Class<C> type) {
+        for(AuthChallenge c : getProxyAuthenticate())
+            if(type.isInstance(c))
+                return type.cast(c);
+        return null;
+    }
+
+    default int getAge() {
+        return (int) Double.parseDouble(getStringOrDefault("Age", "0"));
+    }
+
+    default RateLimit getRateLimit() {
+        for(RateLimit.Naming naming : RateLimit.Naming.values()) {
+            RateLimit rateLimit = getRateLimit(naming);
+            if(rateLimit != null)
+                return rateLimit;
+        }
+        return null;
+    }
+
+    default RateLimit getRateLimit(@NotNull RateLimit.Naming naming) {
+        return getRateLimit(Arguments.checkNull(naming, "naming").headerPrefix());
+    }
+
+    default RateLimit getRateLimit(@NotNull String namePrefix) {
+        Arguments.checkNull(namePrefix, "namePrefix");
+        if(!containsKey(namePrefix+"-Limit") || !containsKey(namePrefix+"-Remaining") || !containsKey(namePrefix+"-Reset"))
+            return null;
+        int limit = Integer.parseInt(getString(namePrefix+"-Limit"));
+        int remaining = Integer.parseInt(getString(namePrefix+"-Remaining"));
+        long reset = Integer.parseInt(getString(namePrefix+"-Reset"));
+        return new RateLimit(limit, remaining, Instant.ofEpochSecond(reset <= 60L * 24 * 356 * 20 ? System.currentTimeMillis() / 1000 + reset : reset));
+    }
+
+    default Boolean getKeepAlive() {
+        return getConnection();
+    }
+
+    default Boolean getConnection() {
+        String connection = getString("Connection");
+        return connection != null ? !connection.equalsIgnoreCase("close") : null;
+    }
+
+
 
     @Nullable
     default Header.Values putIfAbsent(String key, String value) {
@@ -179,10 +387,15 @@ public interface Header extends Map<String, Header.Values> {
      * Values mapped to a header key.
      */
     interface Values extends List<String> {
+
         /**
          * An empty, unmodifiable header field value.
          */
-        Values EMPTY = new ReadonlyHeader.ReadonlyValues(List.of());
+        Values EMPTY = Values.init();
+        private static Values init() {
+            Json.registerDeserializer(Values.class, json -> Header.mutableValues(json.as(String[].class)));
+            return new ReadonlyHeader.ReadonlyValues(List.of());
+        }
     }
 
     /**
@@ -192,7 +405,7 @@ public interface Header extends Map<String, Header.Values> {
      * @param values The values for the value object
      * @return The value object
      */
-    static Values values(List<String> values) {
+    static Values values(List<? extends String> values) {
         return new ReadonlyHeader.ReadonlyValues(values);
     }
 
@@ -205,6 +418,26 @@ public interface Header extends Map<String, Header.Values> {
      */
     static Values values(String... values) {
         return new ReadonlyHeader.ReadonlyValues(values);
+    }
+
+    /**
+     * Returns a mutable header field value for the given values. No reference to the list remains.
+     *
+     * @param values The values for the value object
+     * @return The value object
+     */
+    static Values mutableValues(List<? extends String> values) {
+        return new EditableHeader.EditableValues(values);
+    }
+
+    /**
+     * Returns a mutable header field value for the given strings. Must not be null or empty
+     *
+     * @param values The values for the value object
+     * @return The values object
+     */
+    static Values mutableValues(String... values) {
+        return new EditableHeader.EditableValues(values);
     }
 
     /**

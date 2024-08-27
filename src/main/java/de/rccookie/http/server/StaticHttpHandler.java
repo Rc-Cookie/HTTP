@@ -9,18 +9,20 @@ import java.io.OutputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 import de.rccookie.http.ContentType;
 import de.rccookie.http.HttpRequest;
 import de.rccookie.http.HttpResponse;
-import de.rccookie.http.Path;
+import de.rccookie.http.Method;
 import de.rccookie.http.ResponseCode;
+import de.rccookie.http.Route;
 import de.rccookie.util.Arguments;
 import de.rccookie.util.Utils;
 import org.jetbrains.annotations.Contract;
@@ -43,19 +45,23 @@ import org.jetbrains.annotations.Nullable;
  */
 public class StaticHttpHandler implements HttpRequestHandler {
 
+    private static final List<String> HTML_INDEX_NAMES = List.of("index", "main");
+    private static final List<String> HTML_SUFFIXES = List.of(".html", ".xhtml", ".htm");
+
     @Nullable
-    private final java.nio.file.Path fileRoot;
+    private final Path fileRoot;
     @Nullable
-    private final Path resourceRoot;
+    private final Route resourceRoot;
     private final Mapper mapper;
 
+    private boolean findSimilarFiles = true;
     private boolean allowOverride = false;
     private DirectoryDeleteMode directoryDeleteMode = DirectoryDeleteMode.NEVER;
 
-    private final Map<Path, Boolean> resourceDirectoryCache = new HashMap<>();
+    private final ConcurrentHashMap<Route, Boolean> resourceDirectoryCache = new ConcurrentHashMap<>();
 
     @Contract("null,null,_->fail")
-    public StaticHttpHandler(@Nullable java.nio.file.Path fileRoot, @Nullable Path resourceRoot, @Nullable Mapper mapper) {
+    public StaticHttpHandler(@Nullable Path fileRoot, @Nullable Route resourceRoot, @Nullable Mapper mapper) {
         if(fileRoot == null)
             this.fileRoot = null;
         else {
@@ -66,22 +72,22 @@ public class StaticHttpHandler implements HttpRequestHandler {
         this.resourceRoot = resourceRoot;
         if(fileRoot == null && resourceRoot == null)
             throw new IllegalArgumentException("At least one of fileRoot and resourceRoot must be present");
-        this.mapper = mapper != null ? mapper : HttpRequest::path;
+        this.mapper = mapper != null ? mapper : HttpRequest::route;
     }
 
-    public StaticHttpHandler(@NotNull java.nio.file.Path fileRoot, @Nullable Mapper mapper) {
+    public StaticHttpHandler(@NotNull Path fileRoot, @Nullable Mapper mapper) {
         this(fileRoot, null, mapper);
     }
 
-    public StaticHttpHandler(@NotNull Path resourceRoot, @Nullable Mapper mapper) {
+    public StaticHttpHandler(@NotNull Route resourceRoot, @Nullable Mapper mapper) {
         this(null, resourceRoot, mapper);
     }
 
-    public StaticHttpHandler(@NotNull java.nio.file.Path fileRoot) {
+    public StaticHttpHandler(@NotNull Path fileRoot) {
         this(fileRoot, null);
     }
 
-    public StaticHttpHandler(@NotNull Path resourceRoot) {
+    public StaticHttpHandler(@NotNull Route resourceRoot) {
         this(resourceRoot, null);
     }
 
@@ -124,20 +130,44 @@ public class StaticHttpHandler implements HttpRequestHandler {
         this.directoryDeleteMode = Arguments.checkNull(directoryDeleteMode, "directoryDeleteMode");
     }
 
+    /**
+     * Returns whether, if a requested file isn't found directly, an attempt will be made to
+     * find a similar file named something along the lines of <code>"index.html"</code> or
+     * <code>"index.xhtml"</code> if it's a directory, or <code>"name.html"</code> if the file
+     * <code>"name"</code> was requested. Enabled by default.
+     *
+     * @return Whether to try and find similar files if the requested file isn't found
+     */
+    public boolean isFindSimilarFiles() {
+        return findSimilarFiles;
+    }
+
+    /**
+     * Sets whether, if a requested file isn't found directly, an attempt will be made to
+     * find a similar file named something along the lines of <code>"index.html"</code> or
+     * <code>"index.xhtml"</code> if it's a directory, or <code>"name.html"</code> if the file
+     * <code>"name"</code> was requested. Enabled by default.
+     *
+     * @param findSimilarFiles Whether to try and find similar files if the requested file isn't found
+     */
+    public void setFindSimilarFiles(boolean findSimilarFiles) {
+        this.findSimilarFiles = findSimilarFiles;
+    }
+
 
     @Override
     public void respond(HttpRequest.Received request) throws Exception {
         String path = mapper.remap(request).toString().substring(1);
 
-        if(request.method() == HttpRequest.Method.GET || request.method() == HttpRequest.Method.HEAD) {
+        if(request.method() == Method.GET || request.method() == Method.HEAD) {
             if(getFromFS(request, path)) return;
             if(getFromResources(request, path)) return;
         }
-        if(request.method() == HttpRequest.Method.PUT || request.method() == HttpRequest.Method.POST) {
+        if(request.method() == Method.PUT || request.method() == Method.POST) {
             putToFS(request, path);
             return;
         }
-        if(request.method() == HttpRequest.Method.DELETE) {
+        if(request.method() == Method.DELETE) {
             deleteFromFS(request, path);
             return;
         }
@@ -145,78 +175,130 @@ public class StaticHttpHandler implements HttpRequestHandler {
         throw HttpRequestFailure.notFound();
     }
 
-    private boolean getFromFS(HttpRequest.Received request, String path) throws Exception {
+    private boolean getFromFS(HttpRequest.Received request, String path) {
         if(fileRoot == null) return false;
-        java.nio.file.Path p = fileRoot.resolve(path).toAbsolutePath().normalize();
+        Path p = fileRoot.resolve(path).toAbsolutePath().normalize();
         if(!p.startsWith(fileRoot)) return false;
 
-        if(!Files.exists(p)) {
-            // Test whether name.html exists
+        Path alt = p;
+        if(findSimilarFiles && !Files.isRegularFile(alt)) {
             String name = p.getFileName().toString();
-            if(name.contains(".")) return false; // Has file suffix
-            p = p.resolveSibling(name+".html");
-
-        } else if(Files.isDirectory(p)) {
-            // Test whether name/index.html or name/main.html exists
-            p = p.resolve("index.html");
-            if(!Files.exists(p) || Files.isDirectory(p))
-                p = p.resolveSibling("main.html");
+            if(!p.equals(fileRoot) && !name.contains(".")) {
+                // Test if name.html, name.xhtml or name.htm exists
+                for(String suffix : HTML_SUFFIXES) {
+                    alt = p.resolveSibling(name + suffix);
+                    if(Files.isRegularFile(alt))
+                        break;
+                }
+            }
+            if(!Files.isRegularFile(alt) && Files.isDirectory(p)) {
+                // Test if index.html, index.xhtml, main.html, etc. exists
+                outer: for(String index : HTML_INDEX_NAMES) {
+                    for(String suffix : HTML_SUFFIXES) {
+                        alt = p.resolve(index + suffix);
+                        if(Files.isRegularFile(alt))
+                            break outer;
+                    }
+                }
+            }
         }
-        if(!Files.exists(p) || Files.isDirectory(p)) return false;
+        if(!Files.isRegularFile(alt)) return false;
 
-        request.respond(ResponseCode.OK)
-                .setContentType(ContentType.guessFromName(p.getFileName().toString()))
-                .setStream(Files.newInputStream(p));
+        request.respond(ResponseCode.OK).setFile(alt);
         return true;
     }
 
     private boolean getFromResources(HttpRequest.Received request, String path) throws Exception {
         if(resourceRoot == null) return false;
-        Path p = resourceRoot.resolve(path).normalize();
+        Route p = resourceRoot.resolve(path).normalize();
         if(!p.startsWith(resourceRoot)) return false;
 
-        URL resource = getClass().getResource(p.toString());
-        boolean dir = isDirectory(p, resource);
-        if(resource == null || dir) {
-            // Test whether name.html exists
-            String name = p.getFileName();
-            if(name.contains(".")) return false; // Has file suffix
+        URL resource = getResource(p);
 
-            p = p.resolveSibling(name+".html");
-            resource = getClass().getResource(p.toString());
-        }
-        else if(dir) {
-            // Test whether name/index.html or name/main.html exists
-            p = p.resolve("index.html");
-            resource = getClass().getResource(p.toString());
-            if(resource == null) {
-                p = p.resolveSibling("main.html");
-                resource = getClass().getResource(p.toString());
+
+
+
+        Route alt = p;
+        URL altResource = resource;
+        if(findSimilarFiles && !isRegularFile(p, resource)) {
+            String name = p.getFileName();
+            if(!p.equals(resourceRoot) && !name.contains(".")) {
+                // Test if name.html, name.xhtml or name.htm exists
+                for(String suffix : HTML_SUFFIXES) {
+                    alt = p.resolveSibling(name + suffix);
+                    altResource = getResource(alt);
+                    if(isRegularFile(alt, altResource))
+                        break;
+                }
+            }
+            if(!isRegularFile(alt, altResource) && isDirectory(p, resource)) {
+                // Test if index.html, index.xhtml, main.html, etc. exists
+                outer: for(String index : HTML_INDEX_NAMES) {
+                    for(String suffix : HTML_SUFFIXES) {
+                        alt = p.resolve(index + suffix);
+                        altResource = getResource(alt);
+                        if(isRegularFile(alt, altResource))
+                            break outer;
+                    }
+                }
             }
         }
-        if(resource == null) return false;
+        if(!isRegularFile(alt, altResource)) return false;
 
-        HttpResponse.Sendable resp = request.respond(ResponseCode.OK)
+        p = alt;
+        resource = altResource;
+
+//        if(resource == null || pIsDir) {
+//            // Test whether name.html exists
+//            String name = p.getFileName();
+//            if(name.contains(".")) return false; // Has file suffix
+//
+//            p = p.resolveSibling(name+".html");
+//            resource = getClass().getResource(p.toString());
+//        }
+//        else if(pIsDir) {
+//            // Test whether name/index.html or name/main.html exists
+//            p = p.resolve("index.html");
+//            resource = getClass().getResource(p.toString());
+//            if(resource == null) {
+//                p = p.resolveSibling("main.html");
+//                resource = getClass().getResource(p.toString());
+//            }
+//        }
+//        if(resource == null) return false;
+
+
+        long length = resource.openConnection().getContentLengthLong();
+
+        HttpResponse.Editable resp = request.respond(ResponseCode.OK)
                 .setContentType(ContentType.guessFromName(p.getFileName()));
-        if(request.method() != HttpRequest.Method.HEAD)
+        if(length != -1)
+            resp.setHeaderField("Content-Length", length+"");
+        if(request.method() != Method.HEAD)
             resp.setStream(resource.openStream());
         return true;
     }
 
-    private boolean isDirectory(Path path, URL resource) {
-        if(resource == null) return false;
-        synchronized(resourceDirectoryCache) {
-            return resourceDirectoryCache.computeIfAbsent(path, this::testIsDirectory);
-        }
+    private URL getResource(Route absolute) {
+        return getClass().getResource(absolute.toString());
     }
 
-    private boolean testIsDirectory(Path path) {
-        URL resource = getClass().getResource(path.toString());
+    private boolean isRegularFile(Route route, URL resource) {
+        return resource != null && !isDirectory(route, resource);
+    }
+
+    private boolean isDirectory(Route route, URL resource) {
+        if(resource == null) return false;
+        return resourceDirectoryCache.computeIfAbsent(route, this::testIsDirectory);
+    }
+
+    private boolean testIsDirectory(Route route) {
+        URL resource = getClass().getResource(route.toString());
         if(resource == null) return false;
         try(BufferedReader in = new BufferedReader(new InputStreamReader(resource.openStream()))) {
             Set<String> found = new HashSet<>();
             // This is also true for empty files :/
-            return in.lines().allMatch(l -> found.add(l) && getClass().getResource(path.resolve(l).toString()) != null);
+            return in.lines().allMatch(l -> found.add(l) && getClass().getResource(route.resolve(l).toString()) != null);
         } catch(InvalidPathException e) {
             return false;
         } catch(IOException e) {
@@ -226,8 +308,8 @@ public class StaticHttpHandler implements HttpRequestHandler {
 
     private void putToFS(HttpRequest.Received request, String path) throws Exception {
         if(fileRoot == null)
-            throw HttpRequestFailure.methodNotAllowed(HttpRequest.Method.PUT, null);
-        java.nio.file.Path p = fileRoot.resolve(path).toAbsolutePath().normalize();
+            throw HttpRequestFailure.methodNotAllowed(Method.PUT, null);
+        Path p = fileRoot.resolve(path).toAbsolutePath().normalize();
         if(!p.startsWith(fileRoot))
             throw new HttpRequestFailure(ResponseCode.FORBIDDEN, "Resource cannot be accessed");
 
@@ -245,8 +327,8 @@ public class StaticHttpHandler implements HttpRequestHandler {
 
     private void deleteFromFS(HttpRequest.Received request, String path) throws Exception {
         if(fileRoot == null)
-            throw HttpRequestFailure.methodNotAllowed(HttpRequest.Method.DELETE, null);
-        java.nio.file.Path p = fileRoot.resolve(path).toAbsolutePath().normalize();
+            throw HttpRequestFailure.methodNotAllowed(Method.DELETE, null);
+        Path p = fileRoot.resolve(path).toAbsolutePath().normalize();
         if(!p.startsWith(fileRoot) || (Files.exists(p) && Files.isSameFile(fileRoot, p)))
             throw HttpRequestFailure.notFound();
 
@@ -262,7 +344,7 @@ public class StaticHttpHandler implements HttpRequestHandler {
             //noinspection resource
             Files.walk(p)
                     .sorted(Comparator.reverseOrder())
-                    .map(java.nio.file.Path::toFile)
+                    .map(Path::toFile)
                     .forEach(File::delete);
         }
         else if(!Files.isRegularFile(p))
@@ -275,7 +357,7 @@ public class StaticHttpHandler implements HttpRequestHandler {
         // Cleanup directories
         p = p.getParent().normalize();
         while(!Files.isSameFile(fileRoot, p) && p.startsWith(fileRoot) /* just to be sure */) {
-            try(Stream<java.nio.file.Path> list = Files.list(p)) {
+            try(Stream<Path> list = Files.list(p)) {
                 if(list.findAny().isPresent()) break;
             }
             Files.delete(p);
@@ -295,7 +377,7 @@ public class StaticHttpHandler implements HttpRequestHandler {
         /**
          * Simply returns the raw path from the request.
          */
-        Mapper IDENTITY = HttpRequest::path;
+        Mapper IDENTITY = HttpRequest::route;
 
         /**
          * Returns the path to the resource to be returned for the given request (may or may
@@ -304,7 +386,7 @@ public class StaticHttpHandler implements HttpRequestHandler {
          * @param request The request to get the path for
          * @return The relative path the requested resource
          */
-        Path remap(HttpRequest request);
+        Route remap(HttpRequest.Received request);
     }
 
     /**

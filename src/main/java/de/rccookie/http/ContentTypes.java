@@ -163,7 +163,8 @@ public class ContentTypes implements ImmutableSet<ContentType>, JsonSerializable
      *
      * @param options The non-empty collection of possible content types
      * @return The content type from the specified content types with the highest weight
-     *         in these content types
+     *         in these content types. If none of the options is available, the first one
+     *         from the collection will be returned.
      */
     @NotNull
     public ContentType getPreferred(Collection<? extends ContentType> options) {

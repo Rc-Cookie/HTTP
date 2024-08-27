@@ -1,6 +1,8 @@
 package de.rccookie.http;
 
+import java.util.Arrays;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import de.rccookie.json.Json;
 import de.rccookie.json.JsonSerializable;
@@ -11,162 +13,104 @@ import org.jetbrains.annotations.Range;
 /**
  * Represents a http status code constant.
  */
-public final class ResponseCode implements JsonSerializable {
+public enum ResponseCode implements JsonSerializable {
+    /*100*/ CONTINUE(),
+    /*101*/ SWITCHING_PROTOCOLS,
+    /*102*/ PROCESSING,
+    /*103*/ EARLY_HINTS,
+    _104, _105, _106, _107, _108, _109, _110, _111, _112, _113, _114, _115, _116, _117, _118, _119, _120, _121, _122, _123, _124, _125, _126, _127, _128, _129, _130, _131, _132, _133, _134, _135, _136, _137, _138, _139, _140, _141, _142, _143, _144, _145, _146, _147, _148, _149, _150, _151, _152, _153, _154, _155, _156, _157, _158, _159, _160, _161, _162, _163, _164, _165, _166, _167, _168, _169, _170, _171, _172, _173, _174, _175, _176, _177, _178, _179, _180, _181, _182, _183, _184, _185, _186, _187, _188, _189, _190, _191, _192, _193, _194, _195, _196, _197, _198, _199,
+    /*200*/ OK("OK"),
+    /*201*/ CREATED,
+    /*202*/ ACCEPTED,
+    /*203*/ NON_AUTHORITATIVE_INFORMATION,
+    /*204*/ NO_CONTENT,
+    /*205*/ RESET_CONTENT,
+    /*206*/ PARTIAL_CONTENT,
+    /*207*/ MULTI_STATUS("Multi-Status"),
+    /*208*/ ALREADY_REPORTED,
+    _209, _210, _211, _212, _213, _214, _215, _216, _217, _218, _219, _220, _221, _222, _223, _224, _225,
+    /*226*/ IM_USED("IM_Used"),
+    _227, _228, _229, _230, _231, _232, _233, _234, _235, _236, _237, _238, _239, _240, _241, _242, _243, _244, _245, _246, _247, _248, _249, _250, _251, _252, _253, _254, _255, _256, _257, _258, _259, _260, _261, _262, _263, _264, _265, _266, _267, _268, _269, _270, _271, _272, _273, _274, _275, _276, _277, _278, _279, _280, _281, _282, _283, _284, _285, _286, _287, _288, _289, _290, _291, _292, _293, _294, _295, _296, _297, _298, _299,
+    /*300*/ MULTIPLE_CHOICES,
+    /*301*/ MOVED_PERMANENTLY,
+    /*302*/ FOUND,
+    /*303*/ SEE_OTHER,
+    /*304*/ NOT_MODIFIED,
+    /*305*/ USE_PROXY,
+    _306,
+    /*307*/ TEMPORARY_REDIRECT,
+    /*308*/ PERMANENT_REDIRECT,
+    _309, _310, _311, _312, _313, _314, _315, _316, _317, _318, _319, _320, _321, _322, _323, _324, _325, _326, _327, _328, _329, _330, _331, _332, _333, _334, _335, _336, _337, _338, _339, _340, _341, _342, _343, _344, _345, _346, _347, _348, _349, _350, _351, _352, _353, _354, _355, _356, _357, _358, _359, _360, _361, _362, _363, _364, _365, _366, _367, _368, _369, _370, _371, _372, _373, _374, _375, _376, _377, _378, _379, _380, _381, _382, _383, _384, _385, _386, _387, _388, _389, _390, _391, _392, _393, _394, _395, _396, _397, _398, _399,
+    /*400*/ BAD_REQUEST,
+    /*401*/ UNAUTHORIZED,
+    /*402*/ PAYMENT_REQUIRED,
+    /*403*/ FORBIDDEN,
+    /*404*/ NOT_FOUND,
+    /*405*/ METHOD_NOT_ALLOWED,
+    /*406*/ NOT_ACCEPTABLE,
+    /*407*/ PROXY_AUTHENTICATION_REQUIRED,
+    /*408*/ REQUEST_TIMEOUT,
+    /*409*/ CONFLICT,
+    /*410*/ GONE,
+    /*411*/ LENGTH_REQUIRED,
+    /*412*/ PRECONDITION_FAILED,
+    /*413*/ PAYLOAD_TOO_LARGE,
+    /*414*/ URI_TOO_LONG("URI Too Long"),
+    /*415*/ UNSUPPORTED_MEDIA_TYPE,
+    /*416*/ RANGE_NOT_SATISFIABLE,
+    /*417*/ EXPECTATION_FAILED,
+    /*418*/ IM_A_TEAPOT("I'm A Teapot"),
+    _419, _420,
+    /*421*/ MISDIRECTED_REQUEST,
+    /*422*/ UNPROCESSABLE_ENTITY,
+    /*423*/ LOCKED,
+    /*424*/ FAILED_DEPENDENCY,
+    /*425*/ TOO_EARLY,
+    /*426*/ UPGRADE_REQUIRED,
+    _427,
+    /*428*/ PRECONDITION_REQUIRED,
+    /*429*/ TOO_MANY_REQUESTS,
+    _430,
+    /*431*/ REQUEST_HEADER_FIELDS_TOO_LARGE,
+    _432, _433, _434, _435, _436, _437, _438, _439, _440, _441, _442, _443, _444, _445, _446, _447, _448, _449, _450,
+    /*451*/ UNAVAILABLE_FOR_LEGAL_REASONS,
+    _452, _453, _454, _455, _456, _457, _458, _459, _460, _461, _462, _463, _464, _465, _466, _467, _468, _469, _470, _471, _472, _473, _474, _475, _476, _477, _478, _479, _480, _481, _482, _483, _484, _485, _486, _487, _488, _489, _490, _491, _492, _493, _494, _495, _496, _497, _498, _499,
+    /*500*/ INTERNAL_SERVER_ERROR,
+    /*501*/ NOT_IMPLEMENTED,
+    /*502*/ BAD_GATEWAY,
+    /*503*/ SERVICE_UNAVAILABLE,
+    /*504*/ GATEWAY_TIMEOUT,
+    /*505*/ HTTP_VERSION_NOT_SUPPORTED,
+    /*506*/ VARIANT_ALSO_NEGOTIATES,
+    /*507*/ INSUFFICIENT_STORAGE,
+    /*508*/ LOOP_DETECTED,
+    _509,
+    /*510*/ NOT_EXTENDED,
+    /*511*/ NETWORK_AUTHENTICATION_REQUIRED,
+    _512, _513, _514, _515, _516, _517, _518, _519, _520, _521, _522, _523, _524, _525, _526, _527, _528, _529, _530, _531, _532, _533, _534, _535, _536, _537, _538, _539, _540, _541, _542, _543, _544, _545, _546, _547, _548, _549, _550, _551, _552, _553, _554, _555, _556, _557, _558, _559, _560, _561, _562, _563, _564, _565, _566, _567, _568, _569, _570, _571, _572, _573, _574, _575, _576, _577, _578, _579, _580, _581, _582, _583, _584, _585, _586, _587, _588, _589, _590, _591, _592, _593, _594, _595, _596, _597, _598, _599;
+
 
     static {
         Json.registerDeserializer(ResponseCode.class, json -> ResponseCode.get(json.asInt()));
     }
-
-    private static final ResponseCode[] CODES = new ResponseCode[500];
-    static {
-        for(int i=0; i<CODES.length; i++)
-            CODES[i] = new ResponseCode(i + 100, null);
-
-        register(100, "CONTINUE");
-        register(101, "SWITCHING PROTOCOLS");
-        register(102, "PROCESSING");
-        register(103, "EARLY HINTS");
-
-        register(200, "OK");
-        register(201, "CREATED");
-        register(202, "ACCEPTED");
-        register(203, "NON AUTHORITATIVE INFORMATION");
-        register(204, "NO CONTENT");
-        register(205, "RESET CONTENT");
-        register(206, "PARTIAL CONTENT");
-        register(207, "MULTI STATUS");
-        register(208, "ALREADY REPORTED");
-        register(226, "IM USED");
-
-        register(300, "MULTIPLE CHOICE");
-        register(301, "MOVED PERMANENTLY");
-        register(302, "FOUND");
-        register(303, "SEE OTHER");
-        register(304, "NOT MODIFIED");
-        register(305, "USE PROXY");
-        register(306, "UNUSED");
-        register(307, "TEMPORARY REDIRECT");
-        register(308, "PERMANENT REDIRECT");
-
-        register(400, "BAD REQUEST");
-        register(401, "UNAUTHORIZED");
-        register(402, "PAYMENT REQUIRED");
-        register(403, "FORBIDDEN");
-        register(404, "NOT FOUND");
-        register(405, "METHOD NOT ALLOWED");
-        register(406, "NOT ACCEPTABLE");
-        register(407, "PROXY AUTHENTICATION REQUIRED");
-        register(408, "REQUEST TIMEOUT");
-        register(409, "CONFLICT");
-        register(410, "GONE");
-        register(411, "LENGTH REQUIRED");
-        register(412, "PRECONDITION FAILED");
-        register(413, "PAYLOAD TOO LARGE");
-        register(414, "URI TOO LONG");
-        register(415, "UNSUPPORTED MEDIA TYPE");
-        register(416, "RANGE NOT SATISFIABLE");
-        register(417, "EXPECTATION FAILED");
-        register(418, "IM A TEAPOT");
-        register(421, "MISDIRECTED REQUEST");
-        register(422, "UNPROCESSABLE ENTITY");
-        register(423, "LOCKED");
-        register(424, "FAILED DEPENDENCY");
-        register(425, "TOO EARLY");
-        register(426, "UPGRADE REQUIRED");
-        register(428, "PRECONDITION REQUIRED");
-        register(429, "TOO MANY REQUESTS");
-        register(431, "REQUEST HEADER FIELDS TOO LARGE");
-        register(451, "UNAVAILABLE FOR LEGAL REASONS");
-
-        register(500, "INTERNAL SERVER ERROR");
-        register(501, "NOT IMPLEMENTED");
-        register(502, "BAD GATEWAY");
-        register(503, "SERVICE UNAVAILABLE");
-        register(504, "GATEWAY TIMEOUT");
-        register(505, "HTTP VERSION NOT SUPPORTED");
-        register(506, "VARIANT ALSO NEGOTIATES");
-        register(507, "INSUFFICIENT STORAGE");
-        register(508, "LOOP DETECTED");
-        register(510, "NOT EXTENDED");
-        register(511, "NETWORK AUTHENTICATION REQUIRED");
-    }
-
-    public static final ResponseCode CONTINUE = get(100);
-    public static final ResponseCode SWITCHING_PROTOCOLS = get(101);
-    public static final ResponseCode PROCESSING = get(102);
-    public static final ResponseCode EARLY_HINTS = get(103);
-
-    public static final ResponseCode OK = get(200);
-    public static final ResponseCode CREATED = get(201);
-    public static final ResponseCode ACCEPTED = get(202);
-    public static final ResponseCode NON_AUTHORITATIVE_INFORMATION = get(203);
-    public static final ResponseCode NO_CONTENT = get(204);
-    public static final ResponseCode RESET_CONTENT = get(205);
-    public static final ResponseCode PARTIAL_CONTENT = get(206);
-    public static final ResponseCode MULTI_STATUS = get(207);
-    public static final ResponseCode ALREADY_REPORTED = get(208);
-    public static final ResponseCode IM_USED = get(226);
-
-    public static final ResponseCode MULTIPLE_CHOICE = get(300);
-    public static final ResponseCode MOVED_PERMANENTLY = get(301);
-    public static final ResponseCode FOUND = get(302);
-    public static final ResponseCode SEE_OTHER = get(303);
-    public static final ResponseCode NOT_MODIFIED = get(304);
-    @Deprecated
-    public static final ResponseCode USE_PROXY = get(305);
-    public static final ResponseCode UNUSED = get(306);
-    public static final ResponseCode TEMPORARY_REDIRECT = get(307);
-    public static final ResponseCode PERMANENT_REDIRECT = get(308);
-
-    public static final ResponseCode BAD_REQUEST = get(400);
-    public static final ResponseCode UNAUTHORIZED = get(401);
-    public static final ResponseCode PAYMENT_REQUIRED = get(402);
-    public static final ResponseCode FORBIDDEN = get(403);
-    public static final ResponseCode NOT_FOUND = get(404);
-    public static final ResponseCode METHOD_NOT_ALLOWED = get(405);
-    public static final ResponseCode NOT_ACCEPTABLE = get(406);
-    public static final ResponseCode PROXY_AUTHENTICATION_REQUIRED = get(407);
-    public static final ResponseCode REQUEST_TIMEOUT = get(408);
-    public static final ResponseCode CONFLICT = get(409);
-    public static final ResponseCode GONE = get(410);
-    public static final ResponseCode LENGTH_REQUIRED = get(411);
-    public static final ResponseCode PRECONDITION_FAILED = get(412);
-    public static final ResponseCode PAYLOAD_TOO_LARGE = get(413);
-    public static final ResponseCode URI_TOO_LONG = get(414);
-    public static final ResponseCode UNSUPPORTED_MEDIA_TYPE = get(415);
-    public static final ResponseCode RANGE_NOT_SATISFIABLE = get(416);
-    public static final ResponseCode EXPECTATION_FAILED = get(417);
-    public static final ResponseCode IM_A_TEAPOT = get(418);
-    public static final ResponseCode MISDIRECTED_REQUEST = get(421);
-    public static final ResponseCode UNPROCESSABLE_ENTITY = get(422);
-    public static final ResponseCode LOCKED = get(423);
-    public static final ResponseCode FAILED_DEPENDENCY = get(424);
-    public static final ResponseCode TOO_EARLY = get(425);
-    public static final ResponseCode UPGRADE_REQUIRED = get(426);
-    public static final ResponseCode PRECONDITION_REQUIRED = get(428);
-    public static final ResponseCode TOO_MANY_REQUESTS = get(429);
-    public static final ResponseCode REQUEST_HEADER_FIELDS_TOO_LARGE = get(431);
-    public static final ResponseCode UNAVAILABLE_FOR_LEGAL_REASONS = get(451);
-
-    public static final ResponseCode INTERNAL_SERVER_ERROR = get(500);
-    public static final ResponseCode NOT_IMPLEMENTED = get(501);
-    public static final ResponseCode BAD_GATEWAY = get(502);
-    public static final ResponseCode SERVICE_UNAVAILABLE = get(503);
-    public static final ResponseCode GATEWAY_TIMEOUT = get(504);
-    public static final ResponseCode HTTP_VERSION_NOT_SUPPORTED = get(505);
-    public static final ResponseCode VARIANT_ALSO_NEGOTIATES = get(506);
-    public static final ResponseCode INSUFFICIENT_STORAGE = get(507);
-    public static final ResponseCode LOOP_DETECTED = get(508);
-    public static final ResponseCode NOT_EXTENDED = get(510);
-    public static final ResponseCode NETWORK_AUTHENTICATION_REQUIRED = get(511);
+    private static final ResponseCode[] CODES = ResponseCode.values();
 
 
-    @Range(from = 100, to = 599)
-    private final int code;
     private String name;
 
-    private ResponseCode(@Range(from = 100, to = 599) int code, String name) {
-        this.code = Arguments.checkRange(code, 100, 600);
+    ResponseCode() {
+        String name = name();
+        if(name.startsWith("_"))
+            this.name = null;
+        else {
+            this.name = Arrays.stream(name.split("_"))
+                    .filter(p -> !p.isEmpty())
+                    .map(p -> Character.toUpperCase(p.charAt(0)) + p.substring(1).toLowerCase())
+                    .collect(Collectors.joining(" "));
+        }
+    }
+
+    ResponseCode(String name) {
         this.name = name;
     }
 
@@ -177,12 +121,12 @@ public final class ResponseCode implements JsonSerializable {
      */
     @Override
     public String toString() {
-        return code + " " + (name != null ? name : "<unknown>");
+        return code() + " " + (name != null ? name : "<unknown>");
     }
 
     @Override
     public Object toJson() {
-        return code;
+        return code();
     }
 
     /**
@@ -192,16 +136,16 @@ public final class ResponseCode implements JsonSerializable {
      */
     @Range(from = 100, to = 599)
     public int code() {
-        return code;
+        return ordinal() + 100;
     }
 
     /**
-     * Returns the all-upper name of this response code, for example "OK", or
+     * Returns the name of this response code, for example "OK" or "Not Found", or
      * <code>null</code> if this status code has no known name.
      *
      * @return The name of this code
      */
-    public String name() {
+    public String httpName() {
         return name;
     }
 
@@ -211,7 +155,7 @@ public final class ResponseCode implements JsonSerializable {
      * @return The type of this response code
      */
     public Type type() {
-        return Type.forCode(code);
+        return Type.forCode(code());
     }
 
     /**
@@ -221,7 +165,20 @@ public final class ResponseCode implements JsonSerializable {
      * @return Whether this response code indicates a successful connection
      */
     public boolean success() {
-        return code < 400;
+        return code() < 400;
+    }
+
+    /**
+     * Returns whether this response code indicates that the requested task was performed
+     * successfully, that is, the response code is between <code>200</code> and <code>299</code>.
+     *
+     * <p>This method differs from {@link #success()} in that it returns <code>false</code> for
+     * <code>1XX</code> and <code>3XX</code> response codes.</p>
+     *
+     * @return Whether this response code indicates a successful, completed connection
+     */
+    public boolean ok() {
+        return code() >= 200 && code() < 300;
     }
 
     /**
@@ -253,9 +210,9 @@ public final class ResponseCode implements JsonSerializable {
      */
     @NotNull
     public static ResponseCode find(String name) {
-        name = Arguments.checkNull(name, "name").toUpperCase();
+        name = Arguments.checkNull(name, "name");
         for(ResponseCode code : CODES)
-            if(code.name.equals(name))
+            if(code.name.equalsIgnoreCase(name))
                 return code;
         throw new IllegalArgumentException("Unknown response code '"+name+"'");
     }
@@ -271,10 +228,10 @@ public final class ResponseCode implements JsonSerializable {
      */
     public static void register(@Range(from = 100, to = 599) int code, String name) {
         Arguments.checkRange(code, 100, 600);
-        name = Arguments.checkNull(name, "name").toUpperCase();
+        name = Arguments.checkNull(name, "name");
         for(ResponseCode c : CODES)
-            if(c.code != code && Objects.equals(c.name, name))
-                throw new IllegalArgumentException("A response code with name '"+name+"' already exists("+c.code+")");
+            if(c.code() != code && Objects.equals(c.name, name))
+                throw new IllegalArgumentException("A response code with name '"+name+"' already exists("+c.code()+")");
         ResponseCode c = CODES[code - 100];
         if(c.name == null)
             c.name = name;

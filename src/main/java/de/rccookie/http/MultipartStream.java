@@ -16,6 +16,7 @@ final class MultipartStream implements Iterator<Body.Multipart.Part> {
 
     private final InputStream in;
     private final Charset charset;
+    private final String boundaryStr;
     private final byte[] boundary;
     private final byte[] startOfPart;
     Boolean hasNext = null;
@@ -26,14 +27,19 @@ final class MultipartStream implements Iterator<Body.Multipart.Part> {
         try {
             readUntil("--");
             byte[] boundary = readUntil("\r\n");
+            this.boundaryStr = new String(boundary);
             byte[] prefix = "\r\n--".getBytes(charset);
             this.boundary = new byte[prefix.length + boundary.length];
             System.arraycopy(prefix, 0, this.boundary, 0, prefix.length);
-            System.arraycopy(boundary, 0, this.boundary, 0, boundary.length);
+            System.arraycopy(boundary, 0, this.boundary, prefix.length, boundary.length);
             startOfPart = "Content-Disposition: form-data; ".getBytes(charset);
         } catch(IOException e) {
             throw new UncheckedException(e);
         }
+    }
+
+    public String boundary() {
+        return boundaryStr;
     }
 
 
@@ -77,7 +83,10 @@ final class MultipartStream implements Iterator<Body.Multipart.Part> {
             if(name == null) throw new MultipartSyntaxException("name key missing");
 
             byte[] data = readUntil(boundary, "boundary");
-            return Body.Multipart.Part.of(name, filename, ContentType.of(contentType), Body.of(data));
+            // skip \r\n or --
+            //noinspection ResultOfMethodCallIgnored
+            in.skip(2);
+            return Body.Multipart.Part.of(name, filename, contentType != null ? ContentType.of(contentType) : null, Body.of(data));
 
         } catch(IOException e) {
             throw new UncheckedException(e);
@@ -88,26 +97,24 @@ final class MultipartStream implements Iterator<Body.Multipart.Part> {
     private byte[] readUntil(String end) throws IOException {
         return readUntil(end.getBytes(charset), Json.toString(end));
     }
-    private byte[] readUntil(byte[] end, String endDesc) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-        int i = 0;
-        while(i < end.length) {
+    private byte[] readUntil(byte[] end, String endDesc) throws IOException {
+        ExposedByteArrayOutputStream read = new ExposedByteArrayOutputStream();
+
+        while(read.size() < end.length || !Arrays.equals(end, 0, end.length, read.buf(), read.size() - end.length, read.size())) {
             int b = in.read();
             if(b == -1) throw new MultipartSyntaxException("Expected "+endDesc+", found EOF");
-            if(b == end[i]) i++;
-            else {
-                int startI = i;
-                while(i > 0) {
-                    out.write(end[0]);
-                    i--;
-                    if(Arrays.equals(end, 0, i, end, startI - i, startI) && b == end[i]) break;
-                }
-                if(b == end[i]) i++;
-                else out.write(end);
-            }
+            read.write(b);
         }
 
-        return out.toByteArray();
+        byte[] between = new byte[read.size() - end.length];
+        System.arraycopy(read.buf(), 0, between, 0, between.length);
+        return between;
+    }
+
+    private static class ExposedByteArrayOutputStream extends ByteArrayOutputStream {
+        public byte[] buf() {
+            return buf;
+        }
     }
 }

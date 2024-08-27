@@ -107,7 +107,7 @@ class EditableHeader implements Header {
 
     @Override
     public Values addSetCookie(@NotNull Cookie cookie) {
-        return add("Set-Cookie", Arguments.checkNull(cookie, "cookie").toString(context != null ? context.path() : Path.ROOT));
+        return add("Set-Cookie", Arguments.checkNull(cookie, "cookie").toString(context != null ? context.route() : Route.ROOT));
     }
 
 
@@ -115,7 +115,7 @@ class EditableHeader implements Header {
 
         private final List<String> data = new ArrayList<>();
 
-        EditableValues(List<String> data) {
+        EditableValues(List<? extends String> data) {
             addAll(data);
         }
 

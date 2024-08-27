@@ -1,5 +1,6 @@
 package de.rccookie.http;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -10,6 +11,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import de.rccookie.http.auth.AuthChallenge;
+import de.rccookie.http.useragent.UserAgent;
 import de.rccookie.util.Console;
 import de.rccookie.util.Utils;
 
@@ -23,9 +26,13 @@ final class ReadonlyHeader implements Header {
     private Collection<Values> values = null;
     private Set<Entry<String, Values>> entrySet = null;
 
+    private Instant date = null;
     private ContentTypes accept = null;
     private Map<String, Cookie> cookies = null;
     private boolean cookiesIsSetCookies = false;
+    private UserAgent userAgent = null;
+    private List<AuthChallenge> wwwAuthenticate = null;
+    private List<AuthChallenge> proxyAuthenticate = null;
 
     ReadonlyHeader(@NotNull Map<? extends String, ? extends List<? extends String>> map) {
         data = new HashMap<>(map.size());
@@ -120,6 +127,13 @@ final class ReadonlyHeader implements Header {
     }
 
     @Override
+    public Instant getDate() {
+        if(date == null)
+            date = Header.super.getDate();
+        return date;
+    }
+
+    @Override
     public @NotNull Map<String, Cookie> getCookies() {
         if(cookies == null || cookiesIsSetCookies) {
             try {
@@ -137,20 +151,14 @@ final class ReadonlyHeader implements Header {
     @Override
     public @NotNull Map<String, Cookie> getSetCookies() {
         if(cookies == null || !cookiesIsSetCookies) {
-            try {
-                cookies = Header.super.getSetCookies();
-            } catch(Exception e) {
-                Console.warn("Failed to parse received cookies:");
-                Console.warn(e);
-                cookies = Map.of();
-            }
+            cookies = Header.super.getSetCookies();
             cookiesIsSetCookies = true;
         }
         return cookies;
     }
 
     @Override
-    public ContentTypes getAccept() {
+    public @NotNull ContentTypes getAccept() {
         if(accept == null) try {
             accept = Header.super.getAccept();
         } catch(Exception e) {
@@ -170,6 +178,28 @@ final class ReadonlyHeader implements Header {
             Console.warn(e);
             return null;
         }
+    }
+
+    @Override
+    public @NotNull UserAgent getUserAgent() {
+        // No parsing here, but UserAgent itself caches its results, so we should return the same instance
+        if(userAgent == null)
+            userAgent = Header.super.getUserAgent();
+        return userAgent;
+    }
+
+    @Override
+    public @NotNull List<AuthChallenge> getAuthenticate() {
+        if(wwwAuthenticate == null)
+            wwwAuthenticate = Utils.view(Header.super.getAuthenticate());
+        return wwwAuthenticate;
+    }
+
+    @Override
+    public @NotNull List<AuthChallenge> getProxyAuthenticate() {
+        if(proxyAuthenticate == null)
+            proxyAuthenticate = Utils.view(Header.super.getProxyAuthenticate());
+        return proxyAuthenticate;
     }
 
     static final class ReadonlyValues implements Values {

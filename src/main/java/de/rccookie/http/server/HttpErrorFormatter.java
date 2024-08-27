@@ -1,13 +1,7 @@
 package de.rccookie.http.server;
 
-import de.rccookie.http.ContentType;
 import de.rccookie.http.HttpResponse;
-import de.rccookie.http.ResponseCode;
-import de.rccookie.json.IllegalJsonTypeException;
-import de.rccookie.json.JsonObject;
-import de.rccookie.util.Console;
-import de.rccookie.xml.Node;
-import de.rccookie.xml.Text;
+import de.rccookie.util.Arguments;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -19,52 +13,7 @@ public interface HttpErrorFormatter {
     /**
      * A default formatter which returns a json or xml error information.
      */
-    HttpErrorFormatter DEFAULT = (response, failure) -> {
-        if(failure.code().type() == ResponseCode.Type.SERVER_ERROR)
-            Console.error(failure);
-
-        double useJson, useXml;
-        //noinspection ConstantValue
-        if(response.request() == null) { // The default formatter may be used as fallback formatter if the request could not be parsed
-            useJson = 1;
-            useXml = 0;
-        } else try {
-            useJson = response.request().accept().getWeight(ContentType.JSON);
-            useXml = response.request().accept().getWeight(ContentType.XML);
-        } catch (IllegalArgumentException e) {
-            // Error parsing mime types
-            useJson = 1;
-            useXml = 0;
-        }
-
-        if(useJson >= useXml) {
-            JsonObject json = new JsonObject(
-                    "error", true,
-                    "code", response.code().code(),
-                    "name", response.code().name()
-            );
-            if(failure.message() != null)
-                json.put("message", failure.message());
-            if(failure.detail() != null) try {
-                json.put("detail", failure.detail());
-            } catch (IllegalJsonTypeException e) {
-                json.put("detail", failure.toString());
-            }
-            response.setJson(json);
-        } else {
-            Node xml = new Node(
-                    "response",
-                    new Node("error", new Text("true")),
-                    new Node("code", new Text(response.code().code() + "")),
-                    new Node("name", new Text(response.code().name()))
-            );
-            if(failure.message() != null)
-                xml.children.add(new Node("message", new Text(failure.message())));
-            if(failure.detail() != null)
-                xml.children.add(new Node("detail", new Text(failure.toString())));
-            response.setXML(xml);
-        }
-    };
+    HttpErrorFormatter DEFAULT = DefaultErrorFormatter.INSTANCE;
 
     /**
      * Sets the response to the default error message format, but <b>does not</b>
@@ -73,5 +22,20 @@ public interface HttpErrorFormatter {
      * @param response The response to be formatted to an error response
      * @param failure The error details to be included in the response
      */
-    void format(HttpResponse.Sendable response, @NotNull HttpRequestFailure failure);
+    void format(HttpResponse.Editable response, @NotNull HttpRequestFailure failure);
+
+    /**
+     * Returns an error formatter that first applies this formatter, and then the given
+     * formatter.
+     *
+     * @param formatter The formatter to apply after this one
+     * @return A formatter performing first this and then the given formatter
+     */
+    default HttpErrorFormatter and(HttpErrorFormatter formatter) {
+        Arguments.checkNull(formatter, "formatter");
+        return (r,f) -> {
+            format(r,f);
+            formatter.format(r,f);
+        };
+    }
 }

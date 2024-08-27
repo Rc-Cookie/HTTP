@@ -55,18 +55,19 @@ public abstract class HttpRedirect extends HttpControlFlowException {
         return code;
     }
 
-    public void format(HttpResponse.Sendable response) {
+    @Override
+    public void format(HttpResponse.Editable response) {
         response.setCode(code);
         doFormat(response);
     }
 
-    protected abstract void doFormat(HttpResponse.Sendable response);
+    protected abstract void doFormat(HttpResponse.Editable response);
 
 
-    public static HttpRedirect multipleChoices(Consumer<? super HttpResponse.Sendable> formatter) {
-        return new HttpRedirect(ResponseCode.MULTIPLE_CHOICE) {
+    public static HttpRedirect multipleChoices(Consumer<? super HttpResponse.Editable> formatter) {
+        return new HttpRedirect(ResponseCode.MULTIPLE_CHOICES) {
             @Override
-            public void doFormat(HttpResponse.Sendable response) {
+            public void doFormat(HttpResponse.Editable response) {
                 formatter.accept(response);
             }
         };
@@ -74,9 +75,9 @@ public abstract class HttpRedirect extends HttpControlFlowException {
 
     public static HttpRedirect multipleChoices(Map<? extends String, ? extends String> choices, @Nullable String preferred) {
         Arguments.checkNull(choices, "choices");
-        return new HttpRedirect(ResponseCode.MULTIPLE_CHOICE) {
+        return new HttpRedirect(ResponseCode.MULTIPLE_CHOICES) {
             @Override
-            public void doFormat(HttpResponse.Sendable response) {
+            public void doFormat(HttpResponse.Editable response) {
                 choices.forEach((url,$) -> response.addHeaderField("Link", url+"; rel=\"alternative\""));
                 if(preferred != null)
                     response.setHeaderField("Location", preferred);
@@ -97,11 +98,17 @@ public abstract class HttpRedirect extends HttpControlFlowException {
                         Node a = new Node("a");
                         a.attributes.put("href", url);
                         a.children.add(new Text(name != null ? name : url));
-                        list.children.add(a);
+                        list.children.add(new Node("li", a));
                     });
-                    if(returnType == ContentType.HTML)
-                        response.setHTML(Document.newDefaultHtml(list));
-                    else response.setXML(Document.newDefaultXhtml("Options", list), XML.XHTML);
+                    Document document = Document.newDefaultHtmlOrXhtml(
+                            returnType == ContentType.XHTML,
+                            "Multiple Choices",
+                            new Node("h1", new Text("Multiple Choices")),
+                            list
+                    );
+                    document.getElementByTag("head").children.add(new Node("style", new Text(DefaultErrorFormatter.DEFAULT_CSS)));
+                    response.setXML(document, returnType == ContentType.HTML ? XML.HTML : XML.XHTML);
+                    response.setContentType(returnType);
                 }
                 else {
                     Node list = new Node("choices");
@@ -168,28 +175,44 @@ public abstract class HttpRedirect extends HttpControlFlowException {
         Arguments.checkNull(headerConfigurator, "headerConfigurator");
         return new HttpRedirect(ResponseCode.NOT_MODIFIED) {
             @Override
-            public void doFormat(HttpResponse.Sendable response) {
+            public void doFormat(HttpResponse.Editable response) {
                 headerConfigurator.accept(response.header());
             }
         };
     }
 
 
-    public static HttpRedirect temporaryRedirect(String toUrl) {
+    public static HttpRedirect temporary(String toUrl) {
         return new ToLocation(ResponseCode.TEMPORARY_REDIRECT, Arguments.checkNull(toUrl, "toUrl"));
+    }
+
+    public static HttpRedirect temporary(URL toUrl) {
+        return new ToLocation(ResponseCode.TEMPORARY_REDIRECT, Arguments.checkNull(toUrl, "toUrl"));
+    }
+
+    public static HttpRedirect temporaryRedirect(String toUrl) {
+        return temporary(toUrl);
     }
 
     public static HttpRedirect temporaryRedirect(URL toUrl) {
-        return new ToLocation(ResponseCode.TEMPORARY_REDIRECT, Arguments.checkNull(toUrl, "toUrl"));
+        return temporary(toUrl);
     }
 
 
-    public static HttpRedirect permanentRedirect(String toUrl) {
+    public static HttpRedirect permanent(String toUrl) {
         return new ToLocation(ResponseCode.PERMANENT_REDIRECT, Arguments.checkNull(toUrl, "toUrl"));
+    }
+
+    public static HttpRedirect permanent(URL toUrl) {
+        return new ToLocation(ResponseCode.PERMANENT_REDIRECT, Arguments.checkNull(toUrl, "toUrl"));
+    }
+
+    public static HttpRedirect permanentRedirect(String toUrl) {
+        return permanent(toUrl);
     }
 
     public static HttpRedirect permanentRedirect(URL toUrl) {
-        return new ToLocation(ResponseCode.PERMANENT_REDIRECT, Arguments.checkNull(toUrl, "toUrl"));
+        return permanent(toUrl);
     }
 
 
@@ -207,7 +230,7 @@ public abstract class HttpRedirect extends HttpControlFlowException {
         }
 
         @Override
-        public void doFormat(HttpResponse.Sendable response) {
+        public void doFormat(HttpResponse.Editable response) {
             response.setHeaderField("Location", location);
         }
     }

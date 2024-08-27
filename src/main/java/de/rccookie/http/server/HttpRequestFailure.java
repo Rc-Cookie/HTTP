@@ -1,16 +1,22 @@
 package de.rccookie.http.server;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import de.rccookie.http.ContentType;
 import de.rccookie.http.HttpRequest;
 import de.rccookie.http.HttpResponse;
+import de.rccookie.http.Method;
 import de.rccookie.http.ResponseCode;
+import de.rccookie.http.header.RateLimit;
 import de.rccookie.json.JsonObject;
 import de.rccookie.util.Arguments;
 import de.rccookie.util.Utils;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Range;
 
 /**
  * A special type of {@link RuntimeException} which can / should be thrown by
@@ -74,17 +80,22 @@ public class HttpRequestFailure extends HttpControlFlowException {
         return detail;
     }
 
-    public void format(HttpErrorFormatter defaultFormatter, HttpResponse.Sendable response) {
+    @Override
+    public void format(HttpResponse.Editable response) {
+        format(null, response);
+    }
+
+    public void format(HttpErrorFormatter defaultFormatter, HttpResponse.Editable response) {
         (formatter != null ? formatter : Arguments.checkNull(defaultFormatter, "defaultFormatter"))
                 .format(response, this);
     }
 
 
-    public static HttpRequestFailure unsupportedMediaType(ContentType found, Set<? extends ContentType> expected) {
+    public static HttpRequestFailure unsupportedMediaType(ContentType found, @Nullable Set<? extends ContentType> expected) {
         return new HttpRequestFailure(
                 ResponseCode.UNSUPPORTED_MEDIA_TYPE,
                 "Unsupported type: "+(found != null ? found : "<none>"),
-                new JsonObject("supportedTypes", expected)
+                expected != null ? new JsonObject("supportedTypes", expected) : null
         );
     }
 
@@ -126,15 +137,26 @@ public class HttpRequestFailure extends HttpControlFlowException {
     }
 
     public static HttpRequestFailure notFound() {
-        return new HttpRequestFailure(ResponseCode.NOT_FOUND, "The requested resource could not be located");
+        return notFound("The requested resource could not be located");
     }
 
-    public static HttpRequestFailure methodNotAllowed(HttpRequest.Method method, @Nullable Collection<? extends HttpRequest.Method> allowed) {
+    public static HttpRequestFailure notFound(String message) {
+        return new HttpRequestFailure(ResponseCode.NOT_FOUND, message);
+    }
+
+    public static HttpRequestFailure methodNotAllowed(Method method, @Nullable Collection<? extends Method> allowed) {
         return new HttpRequestFailure(
                 ResponseCode.METHOD_NOT_ALLOWED,
                 "Method "+method+" not allowed",
                 allowed != null ? new JsonObject("allowedMethods", allowed) : null
-        );
+        ) {
+            @Override
+            public void format(HttpErrorFormatter defaultFormatter, HttpResponse.Editable response) {
+                if(allowed != null && !allowed.isEmpty())
+                    response.setHeaderField("Allow", allowed.stream().distinct().sorted().map(Method::toString).collect(Collectors.joining(", ")));
+                super.format(defaultFormatter, response);
+            }
+        };
     }
 
     public static HttpRequestFailure badRequest(String message, @Nullable Object detail, @Nullable Throwable cause) {
@@ -157,7 +179,76 @@ public class HttpRequestFailure extends HttpControlFlowException {
         return new HttpRequestFailure(ResponseCode.CONFLICT, message);
     }
 
+    public static HttpRequestFailure tooManyRequests(@Range(from = 0) int limit, @NotNull Instant reset, @NotNull RateLimit.Naming naming) {
+        return tooManyRequests(new RateLimit(limit, 0, reset), naming);
+    }
+
+    public static HttpRequestFailure tooManyRequests(@NotNull RateLimit rateLimit, @NotNull RateLimit.Naming naming) {
+        return tooManyRequests(rateLimit, Arguments.checkNull(naming, "naming").headerPrefix());
+    }
+
+    public static HttpRequestFailure tooManyRequests(@NotNull RateLimit rateLimit, @NotNull String headerPrefix) {
+        Arguments.checkNull(rateLimit, "rateLimit");
+        return tooManyRequests("Request limit exceeded. Please wait until "+rateLimit.reset()+".", rateLimit, headerPrefix);
+    }
+
+    public static HttpRequestFailure tooManyRequests(@Nullable String message, @NotNull RateLimit rateLimit, @NotNull String headerPrefix) {
+        Arguments.checkNull(rateLimit, "rateLimit");
+        Arguments.checkNull(headerPrefix, "headerPrefix");
+        return new HttpRequestFailure(
+                ResponseCode.TOO_MANY_REQUESTS,
+                message,
+                rateLimit,
+                null,
+                HttpErrorFormatter.DEFAULT.and((r,f) -> r.header().setRateLimit(rateLimit, headerPrefix))
+        );
+    }
+
+    public static HttpRequestFailure tooManyRequests(@Nullable String message) {
+        return new HttpRequestFailure(ResponseCode.TOO_MANY_REQUESTS, message);
+    }
+
+    public static HttpRequestFailure tooManyRequests() {
+        return tooManyRequests("Request limit exceeded. Try again later.");
+    }
+
+    public static HttpRequestFailure internal(String message) {
+        return internal(message, null);
+    }
+
     public static HttpRequestFailure internal(Throwable cause) {
-        return new HttpRequestFailure(ResponseCode.INTERNAL_SERVER_ERROR, null, null, cause);
+        return internal(null, cause);
+    }
+
+    public static HttpRequestFailure internal(String message, Throwable cause) {
+        return new HttpRequestFailure(ResponseCode.INTERNAL_SERVER_ERROR, message, null, cause);
+    }
+
+    public static HttpRequestFailure serviceUnavailable() {
+        return serviceUnavailable((Throwable) null);
+    }
+
+    public static HttpRequestFailure serviceUnavailable(String message) {
+        return serviceUnavailable(message, null);
+    }
+
+    public static HttpRequestFailure serviceUnavailable(Throwable cause) {
+        return serviceUnavailable("The requested service is temporarily unavailable", cause);
+    }
+
+    public static HttpRequestFailure serviceUnavailable(String message, Throwable cause) {
+        return new HttpRequestFailure(ResponseCode.SERVICE_UNAVAILABLE, message, null, cause);
+    }
+
+
+    public static HttpRequestFailure defaultForCode(ResponseCode code, HttpRequest request) {
+        switch(code) {
+            case NOT_FOUND: return notFound();
+            case METHOD_NOT_ALLOWED: return methodNotAllowed(request.method(), null);
+            case UNSUPPORTED_MEDIA_TYPE: return unsupportedMediaType(request.contentType(), null);
+            case TOO_MANY_REQUESTS: return tooManyRequests();
+            case SERVICE_UNAVAILABLE: return serviceUnavailable();
+        }
+        return new HttpRequestFailure(code);
     }
 }

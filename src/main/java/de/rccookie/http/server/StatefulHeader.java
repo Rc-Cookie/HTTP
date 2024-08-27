@@ -119,7 +119,7 @@ class StatefulHeader implements Header {
     @Override
     public Values addSetCookie(@NotNull Cookie cookie) {
         synchronized(response) {
-            return add("Set-Cookie", Arguments.checkNull(cookie, "cookie").toString(response.request().path()));
+            return add("Set-Cookie", Arguments.checkNull(cookie, "cookie").toString(response.request().route()));
         }
     }
 }

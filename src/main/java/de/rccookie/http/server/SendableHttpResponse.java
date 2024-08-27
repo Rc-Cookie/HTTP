@@ -2,6 +2,7 @@ package de.rccookie.http.server;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -14,22 +15,27 @@ import de.rccookie.util.Arguments;
 import de.rccookie.util.Console;
 import de.rccookie.util.Future;
 import de.rccookie.util.ThreadedFutureImpl;
+import de.rccookie.util.UncheckedException;
 import de.rccookie.util.Utils;
 import org.jetbrains.annotations.Nullable;
 
 class SendableHttpResponse implements HttpResponse.Sendable {
 
+    final RawHttpServer server;
     final HttpExchange connection;
-    final HttpRequest request;
+    final HttpRequest.Received request;
     State state = State.EDITABLE;
     ResponseCode code;
     Body body = null;
     Header header = new StatefulHeader(this);
 
-    SendableHttpResponse(HttpExchange connection, @Nullable HttpRequest request, ResponseCode code) {
+    SendableHttpResponse(RawHttpServer server, HttpExchange connection, @Nullable HttpRequest.Received request, ResponseCode code) {
+        this.server = Arguments.checkNull(server, "server");
         this.connection = Arguments.checkNull(connection, "connection");
         this.request = request;
         this.code = Arguments.checkNull(code, "code");
+        if(server.name != null)
+            header.set("Server", server.name);
     }
 
     @Override
@@ -79,12 +85,12 @@ class SendableHttpResponse implements HttpResponse.Sendable {
 
     @Override
     public InetSocketAddress client() {
-        return connection.getRemoteAddress();
+        return request != null ? request.client() : connection.getRemoteAddress();
     }
 
     @Override
     public InetSocketAddress server() {
-        return connection.getLocalAddress();
+        return request != null ? request.server() : connection.getLocalAddress();
     }
 
     @Override
@@ -96,26 +102,31 @@ class SendableHttpResponse implements HttpResponse.Sendable {
 
     @SuppressWarnings("NullableProblems") // Don't annotate with @NotNull, IntelliJ causes an exception then if the method still returns null, which is internally possible
     @Override
-    public HttpRequest request() {
+    public HttpRequest.Received request() {
         return request;
     }
 
     @Override
     public Future<Void> sendAsync() {
-        // Throw exception on calling thread
-        checkSend();
+        // Throw exceptions on calling thread
+        beforeSend();
         return new ThreadedFutureImpl<>(this::sendBlocking0, connection.getHttpContext().getServer().getExecutor()) { };
     }
 
     @Override
     public void send() {
-        checkSend();
+        beforeSend();
         sendBlocking0();
     }
 
-    private void checkSend() {
+    private void beforeSend() {
         checkState();
-        state = State.SENT;
+        if(request instanceof HttpRequest.Received)
+            ((HttpRequest.Received) request).getResponseConfigurators().accept(this);
+        synchronized(this) {
+            checkState();
+            state = State.SENT;
+        }
     }
 
     private Void sendBlocking0() throws HttpSendException {
@@ -127,18 +138,28 @@ class SendableHttpResponse implements HttpResponse.Sendable {
             String method = connection.getRequestMethod(); // Don't use enum because it could be an illegal method
 
             long length;
-            if(body == null || method.equalsIgnoreCase("HEAD") || code == ResponseCode.NO_CONTENT || code == ResponseCode.NOT_MODIFIED)
+            if(body == null || code == ResponseCode.NO_CONTENT || code == ResponseCode.NOT_MODIFIED)
                 length = -1;
             else {
                 length = body.contentLength();
-                if(length == -1) length = 0;
+                if(length != -1 && method.equalsIgnoreCase("HEAD")) {
+                    connection.getResponseHeaders().set("Content-Length", length+"");
+                    length = -1;
+                }
+                else if(length == -1) length = 0;
                 else if(length == 0) length = -1;
             }
             connection.sendResponseHeaders(code.code(), length);
 
-            if(body != null && code.type() != ResponseCode.Type.INFORMATIONAL && !method.equalsIgnoreCase("HEAD") && code != ResponseCode.NOT_MODIFIED) {
+            if(length >= 0 && code.type() != ResponseCode.Type.INFORMATIONAL) {
                 try(OutputStream out = connection.getResponseBody()) {
-                    body.stream().transferTo(out);
+                    body.writeTo(out);
+                } catch(IOException | UncheckedIOException e) {
+                    throw e;
+                } catch(RuntimeException e) {
+                    if(e instanceof UncheckedException && e.getCause() instanceof IOException)
+                        throw (IOException) e.getCause();
+                    throw new RuntimeException("Exception while writing response body to stream", e);
                 }
             }
         } catch(Exception e) {
@@ -150,11 +171,21 @@ class SendableHttpResponse implements HttpResponse.Sendable {
                 Console.warn("Connection closed during send: " + e.getMessage());
             }
             else {
-                HttpServer.logResponse(this, true);
+                try {
+                    server.logResponse(this, true);
+                } catch(Exception f) {
+                    Console.error("Error in response logger:");
+                    Console.error(f);
+                }
                 throw new HttpSendException(e);
             }
         }
-        HttpServer.logResponse(this, false);
+        try {
+            server.logResponse(this, false);
+        } catch(Exception e) {
+            Console.error("Error in response logger:");
+            Console.error(e);
+        }
         return null;
     }
 

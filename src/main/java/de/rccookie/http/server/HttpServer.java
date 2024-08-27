@@ -1,368 +1,440 @@
 package de.rccookie.http.server;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.function.Consumer;
-import java.util.function.Function;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import com.diogonunes.jcolor.Attribute;
-import com.sun.net.httpserver.HttpExchange;
-import de.rccookie.http.Body;
-import de.rccookie.http.ContentType;
-import de.rccookie.http.Header;
 import de.rccookie.http.HttpRequest;
-import de.rccookie.http.HttpResponse;
-import de.rccookie.http.Path;
-import de.rccookie.http.Query;
-import de.rccookie.http.ResponseCode;
-import de.rccookie.json.JsonElement;
+import de.rccookie.http.Method;
+import de.rccookie.http.Route;
+import de.rccookie.http.server.session.LoginRequired;
+import de.rccookie.http.server.session.LoginSessionManager;
 import de.rccookie.util.Arguments;
 import de.rccookie.util.Console;
 import de.rccookie.util.Utils;
-import de.rccookie.util.Wrapper;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public class HttpServer {
+/**
+ * A simple http server with routing support and http processor stack ("middleware") support.
+ */
+public class HttpServer extends RawHttpServer {
 
-    private final com.sun.net.httpserver.HttpServer server;
 
-
+    Handler _404Handler = new Handler(this::default404Handler, true);
     HttpHeadHandler headHandler = HttpHeadHandler.DEFAULT;
-    HttpRequestHandler _404Handler = this::default404Handler;
-    HttpErrorHandler errorHandler = HttpErrorHandler.DEFAULT;
-    HttpErrorFormatter errorFormatter = HttpErrorFormatter.DEFAULT;
 
-    Function<? super String, ? extends String> pathPreprocessor = Function.identity();
-    private final Map<HttpRequest.Method, Map<String, HttpRequestHandler>> concreteHandlers = new HashMap<>();
-    private final Map<HttpRequest.Method, Map<PathPattern, HttpRequestHandler>> patternHandlers = new HashMap<>();
+    private final RootProcessor rootProcessor = new RootProcessor();
+    private final List<HttpProcessor> processors = new ArrayList<>();
+
+    private final ReadWriteLock handlersLock = new ReentrantReadWriteLock();
+    private final Map<Method, Map<Route, Handler>> concreteHandlers = new EnumMap<>(Method.class);
+    private final Map<Method, Map<RoutePattern, Handler>> patternHandlers = new EnumMap<>(Method.class);
+    private final Map<Method, Map<RoutePattern, Handler>> doubleWildcardPatternHandlers = new EnumMap<>(Method.class);
     {
-        for(HttpRequest.Method method : HttpRequest.Method.values()) {
+        for(Method method : Method.values()) {
             concreteHandlers.put(method, new HashMap<>());
             patternHandlers.put(method, new HashMap<>());
+            doubleWildcardPatternHandlers.put(method, new HashMap<>());
         }
     }
 
-    public HttpServer(int port) {
-        this(port, 0);
-    }
+    private final Map<Class<?>, Object> implementations = new ConcurrentHashMap<>();
 
-    public HttpServer(int port, int backlog) {
-        try {
-            server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress(port), backlog);
-        } catch(IOException e) {
-            throw Utils.rethrow(e);
-        }
-        server.setExecutor(Executors.newCachedThreadPool());
-        server.createContext("/", this::handle);
-        server.start();
-    }
 
-    private void handle(HttpExchange connection) {
-        try {
-            sendResponseToRequest(connection);
-        } catch(Exception e) {
-            Console.error("Failed to transfer response:");
-            Console.error(e);
-        }
-    }
+    /**
+     * Creates a new http server not yet bound to any port. The server should
+     * first be configured, then bound to one or more ports using one of the
+     * {@link #listen(int)} methods.
+     */
+    public HttpServer() { }
 
-    private void sendResponseToRequest(HttpExchange connection) throws HttpSendException {
-        Wrapper<HttpRequest.Received> request = new Wrapper<>();
-        if(!executeUserCode(null, connection, () -> request.value = new ReceivedHttpRequest(this, connection, true), null))
-            return;
 
-        logRequest(request.value);
-        HttpRequestHandler handler = findHandler(request.value);
-
-        executeUserCode(request.value, connection, () -> handler.respondAsync(request.value), null);
-    }
-
-    private boolean executeUserCode(HttpRequest.Received request, HttpExchange connection, UserCode code, Consumer<Exception> exceptionHandler) throws HttpSendException {
-        try {
-            code.run();
-            return true;
-        } catch(HttpRedirect redirect) {
-            executeUserCode(request, connection, () -> sendRedirect(request, redirect), exceptionHandler);
-        } catch(HttpRequestFailure failure) {
-            sendFailureResponse(request, connection, failure);
-        } catch(Exception e) {
-            if(exceptionHandler != null)
-                exceptionHandler.accept(e);
-            else handleUserException(request, connection, e);
-        }
-        return false;
-    }
-
-    private void handleUserException(HttpRequest.Received request, HttpExchange connection, Exception e) throws HttpSendException {
-        executeUserCode(request, connection, () -> errorHandler.respondToErrorAsync(request, e), ex -> {
-            Console.error("Exception in exception handler:");
-            Console.error(ex);
-            sendFailureResponse(request, connection, HttpRequestFailure.internal(e));
-        });
-    }
-
-    private void sendFailureResponse(HttpRequest.Received request, HttpExchange connection, HttpRequestFailure failure) throws HttpSendException {
-        HttpResponse.Sendable response;
-        if(request != null) {
-            response = request.respond(failure.code());
-            try {
-                failure.format(errorFormatter, response);
-            } catch (Exception e) {
-                Console.error("Error in error formatter:");
-                Console.error(e);
-                HttpErrorFormatter.DEFAULT.format(response, failure);
-            }
-        }
-        else {
-            response = new SendableHttpResponse(connection, null, failure.code());
-            HttpErrorFormatter.DEFAULT.format(response, failure);
-        }
-        response.send();
-    }
-
-    private void sendRedirect(HttpRequest.Received request, HttpRedirect redirect) throws HttpSendException {
-        HttpResponse.Sendable response = request.respond(redirect.code());
-        redirect.format(response);
-        response.send();
+    @Override
+    protected void respond(HttpRequest.Respondable request) throws Exception {
+        Handler handler = findHandler(request);
+        handler.execute(request);
+        if(request.getResponse() == null)
+            throw new AssertionError();
+        request.getResponse().send();
     }
 
     @NotNull
-    private HttpRequestHandler findHandler(HttpRequest.Received request) {
+    private Handler findHandler(HttpRequest.Received request) {
 
-        String path = request.path().toString();
+        Route route = request.route();
 
-        HttpRequestHandler handler = findHandler(path, request.method());
-        if(handler != null) return handler;
+        handlersLock.readLock().lock();
+        try {
+            Handler handler = findHandler(route, request.method());
+            if(handler != null) return handler;
 
-        if(request.method() == HttpRequest.Method.HEAD && (handler = findHandler(path, HttpRequest.Method.GET)) != null)
-            return headHandler.getHandler(handler);
+            if(request.method() == Method.HEAD && (handler = findHandler(route, Method.GET)) != null)
+                return new Handler(headHandler.getHandler(handler.handler), handler.useCommonProcessors, handler.extraProcessors);
+        } finally {
+            handlersLock.readLock().unlock();
+        }
 
         return _404Handler;
     }
 
     @Nullable
-    private HttpRequestHandler findHandler(String path, HttpRequest.Method method) {
-        if(concreteHandlers.get(method).containsKey(path))
-            return concreteHandlers.get(method).get(path);
-        for(PathPattern pattern : patternHandlers.get(method).keySet())
-            if(pattern.matches(path))
+    private Handler findHandler(Route route, Method method) {
+        if(concreteHandlers.get(method).containsKey(route))
+            return concreteHandlers.get(method).get(route);
+        for(RoutePattern pattern : patternHandlers.get(method).keySet())
+            if(pattern.matches(route))
                 return patternHandlers.get(method).get(pattern);
+        for(RoutePattern pattern : doubleWildcardPatternHandlers.get(method).keySet())
+            if(pattern.matches(route))
+                return doubleWildcardPatternHandlers.get(method).get(pattern);
         return null;
     }
 
-    public void addHandler(HttpRequestHandler handler, String path, HttpRequest.Method... methods) {
+    /**
+     * Adds the given http processor to the http processors stack of this http server.
+     * Multiple http processors will be executed in the order they were registered.
+     *
+     * @param processor The processor to register
+     */
+    public void addProcessor(HttpProcessor processor) {
+        Arguments.checkNull(processor, "processor");
+        synchronized(processors) {
+            processors.add(processor);
+        }
+    }
+
+    /**
+     * Removes the given http processor for the http processors stack of this http server.
+     *
+     * @param processor The processor to remove
+     * @return Whether the processor was registered previously
+     */
+    public boolean removeProcessor(HttpProcessor processor) {
+        synchronized(processors) {
+            return processors.remove(processor);
+        }
+    }
+
+    /**
+     * Registers the given http request handler on the specified route pattern.
+     *
+     * @param route The pattern to bind to. In general, handlers for specific routes will be prioritized
+     *              over ones for a pattern with wildcards, which themselves will be prioritized over ones
+     *              for a wildcard pattern including <code>"**"</code>.
+     * @param handler The handler to register for the given route pattern
+     * @param extraProcessors Additional http processors to execute before / after the given handler only
+     * @param useCommonProcessors Setting this to <code>false</code> allows to bypass the http processors
+     *                            registered now and in the future for the whole server
+     * @param methods The methods to register the handler on
+     */
+    public void addHandler(String route, HttpRequestHandler handler, Collection<? extends HttpProcessor> extraProcessors, boolean useCommonProcessors, Method... methods) {
         Arguments.checkNull(handler, "handler");
-        Arguments.checkNull(path, "path");
+        Arguments.checkNull(route, "route");
         if(Arguments.deepCheckNull(methods, "methods").length == 0)
             throw new IllegalArgumentException("At least one request method is required");
 
-        if(PathPattern.containsPattern(path)) {
-            PathPattern pattern = PathPattern.parse(path);
-            for(HttpRequest.Method method : methods)
-                patternHandlers.get(method).put(pattern, handler);
-        }
-        else for(HttpRequest.Method method : methods)
-            concreteHandlers.get(method).put(path, handler);
-    }
+        Handler h = new Handler(handler, useCommonProcessors, extraProcessors.toArray(new HttpProcessor[0]));
 
-    @SuppressWarnings("unchecked")
-    public void addHandler(HttpRequestListener listener) {
-        for(Method method : listener.getClass().getDeclaredMethods()) {
-            method.setAccessible(true);
-
-            On[] ons = getOns(method);
-            if(ons.length == 0) continue;
-            if(method.getReturnType() != void.class)
-                throw new IllegalHttpRequestListenerException(method+": illegal return type - must be void");
-
-            boolean async = method.getDeclaredAnnotation(AsyncResponse.class) != null;
-
-            Class<?>[] paramTypes = method.getParameterTypes();
-            Function<HttpRequest.Received,?>[] paramGenerators = new Function[paramTypes.length];
-            Arrays.setAll(paramGenerators, i -> getGenerator(method, i));
-
-            HttpRequestHandler handler = r -> {
-                Object[] args = new Object[paramTypes.length];
-                for (int i = 0; i < args.length; i++)
-                    args[i] = paramGenerators[i].apply(r);
-                try {
-                    method.invoke(listener, args);
-                } catch(InvocationTargetException e) {
-                    throw Utils.rethrow(e.getCause() != null ? e.getCause() : e);
+        if(RoutePattern.containsPattern(route)) {
+            RoutePattern pattern = RoutePattern.parse(route);
+            handlersLock.writeLock().lock();
+            try {
+                if(pattern.containsDoubleWildcard()) {
+                    for(Method method : methods)
+                        doubleWildcardPatternHandlers.get(method).put(pattern, h);
+                } else {
+                    for(Method method : methods)
+                        patternHandlers.get(method).put(pattern, h);
                 }
-
-                if(!async) {
-                    HttpResponse.Sendable response = r.getResponse();
-                    if(response == null)
-                        throw new IllegalStateException("Non-async handler did not write response");
-                    if(response.state() == HttpResponse.State.EDITABLE)
-                        response.send();
-                }
-            };
-
-            for(On on : ons) {
-                addHandler(handler, on.path(), on.method());
-                Console.mapDebug("Registered listener", Arrays.stream(on.method()).map(Object::toString).collect(Collectors.joining("|")), on.path(), "-", method);
+            }
+            finally {
+                handlersLock.writeLock().unlock();
             }
         }
+        else{
+            Route routeObj = Route.of(route);
+            handlersLock.writeLock().lock();
+            try {
+                for(Method method : methods)
+                    concreteHandlers.get(method).put(routeObj, h);
+            } finally {
+                handlersLock.writeLock().unlock();
+            }
+        }
+        String methodsStr = Arrays.stream(methods).map(Object::toString).collect(Collectors.joining("|"));
+        methodsStr = methodsStr + Utils.repeat(" ", Math.max(0, 7 - methodsStr.length()));
+        Console.mapDebug("Registered", methodsStr + " " + route + " - " + handler);
     }
 
+    /**
+     * Registers the given http request handler on the specified route pattern.
+     *
+     * @param route The pattern to bind to. In general, handlers for specific routes will be prioritized
+     *              over ones for a pattern with wildcards, which themselves will be prioritized over ones
+     *              for a wildcard pattern including <code>"**"</code>.
+     * @param handler The handler to register for the given route pattern
+     * @param useCommonProcessors Setting this to <code>false</code> allows to bypass the http processors
+     *                            registered now and in the future for the whole server
+     * @param methods The methods to register the handler on
+     */
+    public void addHandler(String route, HttpRequestHandler handler, boolean useCommonProcessors, Method... methods) {
+        addHandler(route, handler, List.of(), useCommonProcessors, methods);
+    }
+
+    /**
+     * Registers the given http request handler on the specified route pattern.
+     *
+     * @param route The pattern to bind to. In general, handlers for specific routes will be prioritized
+     *              over ones for a pattern with wildcards, which themselves will be prioritized over ones
+     *              for a wildcard pattern including <code>"**"</code>.
+     * @param handler The handler to register for the given route pattern
+     * @param extraProcessors Additional http processors to execute before / after the given handler only
+     * @param methods The methods to register the handler on
+     */
+    public void addHandler(String route, HttpRequestHandler handler, Collection<? extends HttpProcessor> extraProcessors, Method... methods) {
+        addHandler(route, handler, extraProcessors, true, methods);
+    }
+
+    /**
+     * Registers the given http request handler on the specified route pattern.
+     *
+     * @param route The pattern to bind to. In general, handlers for specific routes will be prioritized
+     *              over ones for a pattern with wildcards, which themselves will be prioritized over ones
+     *              for a wildcard pattern including <code>"**"</code>.
+     * @param handler The handler to register for the given route pattern
+     * @param methods The methods to register the handler on. At least one is required.
+     */
+    public void addHandler(String route, HttpRequestHandler handler, Method... methods) {
+        addHandler(route, handler, true, methods);
+    }
+
+    /**
+     * Registers the http request listener on this server, that is, it registers all appropriate methods
+     * declared in it as request handlers.
+     *
+     * @param listener The listener to register
+     */
+    public void addHandler(HttpRequestListener listener) {
+        addHandler("", listener);
+    }
+
+    /**
+     * Registers the http request listener on this server, that is, it registers all appropriate methods
+     * declared in it as request handlers.
+     *
+     * @param listener The listener to register
+     * @param routePrefix The route prefix to prepend to each route specified by the listener
+     */
+    public void addHandler(String routePrefix, HttpRequestListener listener) {
+        Arguments.checkNull(listener, "listener");
+        Arguments.checkNull(routePrefix, "routePrefix");
+        if(!routePrefix.isEmpty() && !routePrefix.startsWith("/"))
+            throw new IllegalArgumentException("Route prefix must start with '/'");
+
+        de.rccookie.http.server.annotation.Route clsPrefix = listener.getClass().getAnnotation(de.rccookie.http.server.annotation.Route.class);
+        routePrefix = HttpRequestListenerHandler.validateAndNormalize(routePrefix, true)
+                      + (clsPrefix != null ? HttpRequestListenerHandler.validateAndNormalize(clsPrefix.value(), true) : "");
+
+        for(java.lang.reflect.Method method : listener.getClass().getDeclaredMethods()) {
+            HttpRequestListenerHandler handler = HttpRequestListenerHandler.forMethod(listener, method, routePrefix);
+            if(handler != null)
+                addHandler(handler.route, handler, handler.extraProcessors, handler.useCommonProcessors, handler.methods);
+        }
+
+        for(HttpRequestListener subRoute : listener.subRoutes())
+            addHandler(routePrefix, subRoute);
+    }
+
+    /**
+     * Unregisters the given handler from this server.
+     *
+     * @param handler The handler to unregister
+     * @return Whether the handler was previously registered
+     */
     public boolean removeHandler(HttpRequestHandler handler) {
         boolean change = false;
-        for(HttpRequest.Method method : HttpRequest.Method.values()) {
-            change |= concreteHandlers.get(method).values().remove(handler);
-            change |= patternHandlers.get(method).values().remove(handler);
+        handlersLock.writeLock().lock();
+        try {
+            for(Method method : Method.values()) {
+                change |= concreteHandlers.get(method).values().removeIf(h -> h.handler.equals(handler));
+                change |= patternHandlers.get(method).values().removeIf(h -> h.handler.equals(handler));
+                change |= doubleWildcardPatternHandlers.get(method).values().removeIf(h -> h.handler.equals(handler));
+            }
+        } finally {
+            handlersLock.writeLock().unlock();
         }
         return change;
     }
 
-    public void setHeadHandler(HttpHeadHandler headHandler) {
-        this.headHandler = Arguments.checkNull(headHandler, "headHandler");
+    /**
+     * Sets the error formatter to be used to format {@link HttpRequestFailure}s.
+     *
+     * @param errorFormatter The error formatter to use, or <code>null</code> for the default formatter
+     */
+    public void setErrorFormatter(HttpErrorFormatter errorFormatter) {
+        rootProcessor.errorFormatter = errorFormatter != null ? errorFormatter : HttpErrorFormatter.DEFAULT;
     }
 
+    /**
+     * Sets the head handler which handles http <code>HEAD</code> requests.
+     *
+     * @param headHandler The handler to use, or <code>null</code> for the default handler
+     */
+    public void setHeadHandler(HttpHeadHandler headHandler) {
+        this.headHandler = headHandler != null ? headHandler : HttpHeadHandler.DEFAULT;
+    }
+
+    /**
+     * Sets the http handler to use if no handler matched the route of an http request.
+     *
+     * @param _404Handler The 404 handler to use, or <code>null</code> for the default handler
+     */
     public void set404Handler(HttpRequestHandler _404Handler) {
-        this._404Handler = Arguments.checkNull(_404Handler, "_404Handler");
+        this._404Handler = new Handler(_404Handler != null ? _404Handler : this::default404Handler, true);
     }
 
     private void default404Handler(HttpRequest request) {
-        if(request.method() == HttpRequest.Method.GET || request.method() == HttpRequest.Method.HEAD)
+//        if(request.method() == de.rccookie.http.Method.GET || request.method() == de.rccookie.http.Method.HEAD)
+//            throw HttpRequestFailure.notFound();
+
+        Route route = request.route();
+        Set<Method> allowed = EnumSet.noneOf(Method.class);
+
+        handlersLock.readLock().lock();
+        try {
+            for(Method method : Method.values()) {
+                if(concreteHandlers.get(method).containsKey(route)
+                   || patternHandlers.get(method).keySet().stream().anyMatch(p -> p.matches(route))
+                   || doubleWildcardPatternHandlers.get(method).keySet().stream().anyMatch(p -> p.matches(route))) {
+                    allowed.add(method);
+                }
+            }
+        } finally {
+            handlersLock.readLock().unlock();
+        }
+        if(allowed.isEmpty())
             throw HttpRequestFailure.notFound();
+        if(allowed.contains(Method.GET) && headHandler.listHeadWithGet())
+            allowed.add(Method.HEAD);
+        throw HttpRequestFailure.methodNotAllowed(request.method(), allowed);
+    }
 
-        String path = request.path().toString();
-        Set<HttpRequest.Method> allowed = new HashSet<>();
 
-        for(HttpRequest.Method method : HttpRequest.Method.values()) {
-            if(concreteHandlers.get(method).containsKey(path)
-                || patternHandlers.get(method).keySet().stream().anyMatch(p -> p.matches(path))) {
-                allowed.add(method);
+    /**
+     * Binds the given implementation instance to be used by classes requiring them, e.g. the {@link LoginSessionManager}
+     * instance to be used with <code>@{@link LoginRequired}</code>. This serves as a unified interface to configure
+     * implementation instances especially for annotations to avoid having to specify the configuration every time.
+     *
+     * @param type The type to register an implementation instance for
+     * @param implementation The instance to use for the given type
+     */
+    public <T> void bindImplementation(Class<T> type, T implementation) {
+        implementations.put(Arguments.checkNull(type, "type"), type.cast(implementation));
+    }
+
+    /**
+     * Returns whether an implementation for the given type has been registered on this server.
+     *
+     * @param type The type of implementation to test if present
+     * @return Whether such an implementation has been registered
+     */
+    public boolean hasImplementation(Class<?> type) {
+        return implementations.containsKey(type);
+    }
+
+    /**
+     * Returns the bound implementation instance for the given type, registered previously with {@link #bindImplementation(Class, Object)}.
+     *
+     * @param type The type of implementation to receive
+     * @return The implementation instance used by the server
+     * @throws NoSuchElementException If no implementation has been registered for that type
+     */
+    public <T> T getImplementation(Class<T> type) throws NoSuchElementException {
+        return type.cast(implementations.computeIfAbsent(type, t -> {
+            throw new NoSuchElementException("No implementation specified for "+type);
+        }));
+    }
+
+    /**
+     * Returns the bound implementation instance for the given type, if one has previously been registered using
+     * {@link #bindImplementation(Class, Object)}, or returns the instance returned by the given supplier. If the
+     * default supplied is used, that implementation will not be bound to the server.
+     *
+     * @param type The type of implementation to receive
+     * @param defaultImplementation A supplier generating a default implementation if none has been bound to the server
+     * @return The implementation bound to the server, or the instance returned by the default value function
+     */
+    public <T> T getImplementation(Class<T> type, Supplier<? extends T> defaultImplementation) {
+        synchronized(implementations) {
+            if(implementations.containsKey(type))
+                return type.cast(implementations.get(type));
+        }
+        return defaultImplementation.get();
+    }
+
+
+
+    private final class Handler {
+        private final HttpRequestHandler handler;
+        private final boolean useCommonProcessors;
+        private final HttpProcessor[] extraProcessors;
+
+        private Handler(HttpRequestHandler handler, boolean useCommonProcessors, HttpProcessor... extraProcessors) {
+            this.handler = Arguments.checkNull(handler, "handler");
+            this.useCommonProcessors = useCommonProcessors;
+            this.extraProcessors = Arguments.deepCheckNull(extraProcessors, "extraProcessors");
+        }
+
+        void execute(HttpRequest.Received request) {
+
+            List<HttpProcessor> processors = new ArrayList<>();
+            processors.add(rootProcessor);
+            if(useCommonProcessors) {
+                synchronized(HttpServer.this.processors) {
+                    processors.addAll(HttpServer.this.processors);
+                }
+            }
+            processors.addAll(Arrays.asList(extraProcessors));
+            processors.add(new HandlerProcessor(handler));
+
+            ThrowingRunnable[] executors = new ThrowingRunnable[processors.size() + 2];
+            executors[executors.length - 1] = () -> { throw new AssertionError("Request handler called next function"); };
+            for(int i=processors.size() - 1; i >= 0; i--) {
+                HttpProcessor processor = processors.get(i);
+                ThrowingRunnable next = executors[i+1];
+                executors[i] = () -> {
+                    try {
+                        processor.process(request, next);
+                        if(request.getResponse() == null)
+                            throw new IllegalStateException("Http processor "+processor+" caught exception but did not write response");
+                    } catch(Exception e) {
+                        if(request.getResponse() != null && e instanceof HttpControlFlowException)
+                            Console.warn("Http processor "+processor+" configured response but threw control flow exception. Response will be discarded");
+                        request.invalidateResponse();
+                        throw e;
+                    }
+                };
+            }
+            try {
+                executors[0].run();
+            } catch(RuntimeException e) {
+                throw e;
+            } catch(Exception e) {
+                throw new AssertionError("Root processor threw checked exception: "+e, e);
             }
         }
-        throw allowed.isEmpty() ? HttpRequestFailure.notFound() : HttpRequestFailure.methodNotAllowed(request.method(), allowed);
-    }
-
-    public void setErrorHandler(HttpErrorHandler errorHandler) {
-        this.errorHandler = Arguments.checkNull(errorHandler, "errorHandler");
-    }
-
-    public Function<? super String, ? extends String> getPathPreprocessor() {
-        return pathPreprocessor;
-    }
-
-    public void setPathPreprocessor(Function<? super String, ? extends String> preprocessor) {
-        this.pathPreprocessor = Arguments.checkNull(preprocessor, "preprocessor");
-    }
-
-    public void appendPathPreprocessor(Function<? super String, ? extends String> preprocessor) {
-        Arguments.checkNull(preprocessor, "preprocessor");
-        Function<? super String, ? extends String> other = this.pathPreprocessor;
-        this.pathPreprocessor = p -> preprocessor.apply(other.apply(p));
-    }
-
-    public void stop(int delaySeconds) {
-        server.stop(delaySeconds);
-    }
-
-
-    private static On[] getOns(Method method) {
-        On.Multiple onsContainer = method.getAnnotation(On.Multiple.class);
-        if(onsContainer != null) return onsContainer.value();
-        return method.isAnnotationPresent(On.class) ?
-                new On[] { method.getAnnotation(On.class) } :
-                new On[0];
-    }
-
-    private static Function<HttpRequest,?> getGenerator(Method method, int param) {
-        Class<?> type = method.getParameterTypes()[param];
-        if(type == HttpRequest.class || type == HttpRequest.Received.class) return Function.identity();
-        if(type == Body.class) return HttpRequest::body;
-        if(type == Body.Multipart.class) return r -> r.body() != null ? Body.Multipart.parse(r.body()) : null;
-        if(type == InputStream.class) return HttpRequest::stream;
-        if(type == byte[].class) return HttpRequest::data;
-        if(type == String.class) return HttpRequest::text;
-        if(type == JsonElement.class) return HttpRequest::json;
-        if(type == Header.class) return HttpRequest::header;
-        if(type == Query.class) return HttpRequest::query;
-        if(type == Method.class) return HttpRequest::method;
-        if(type == Path.class) return HttpRequest::path;
-        if(type == InetSocketAddress.class) return HttpRequest::client;
-
-        Parse parse = Arrays.stream(method.getParameterAnnotations()[param])
-                .filter(Parse.class::isInstance).map(Parse.class::cast).findAny()
-                .orElseThrow(() -> new IllegalHttpRequestListenerException(method+" parameter "+(param+1)+": illegal type, no component of http request and not annotated with @Parse"));
-
-        Parser parser = Parsers.getParser(parse);
-        return r -> {
-            ContentType contentType = r.contentType();
-            if((contentType == null && !parser.supportsUnknownMIMEType()) || (contentType != null && !parser.getMIMETypes().contains(contentType)))
-                throw HttpRequestFailure.unsupportedMediaType(contentType, parser.getMIMETypes());
-            return parser.parse(r, type);
-        };
-    }
-
-
-    private static final Object LOG_LOCK = new Object();
-
-    static void logRequest(HttpRequest request) {
-        String str = request.toString();
-        String msg = "<<"+surroundWithLine(str)+"<< "+request.client().toString().substring(1);
-        msg = msg.replace(str, Console.colored(str, Attribute.BOLD()));
-        synchronized(LOG_LOCK) {
-            Console.debug(msg);
-        }
-    }
-
-    static void logResponse(HttpResponse response, boolean forceError) {
-        String str = response.toString();
-        String msg = ">>"+surroundWithLine(str)+">> "+response.client().toString().substring(1);
-        msg = msg.replace(str, Console.colored(str, getColor(forceError ? ResponseCode.Type.SERVER_ERROR : response.code().type()), Attribute.BOLD()));
-        synchronized(LOG_LOCK) {
-            if(forceError || response.code().type() == ResponseCode.Type.SERVER_ERROR)
-                Console.error(msg);
-            else Console.debug(msg);
-        }
-    }
-
-    private static Attribute getColor(ResponseCode.Type type) {
-        switch(type) {
-            case INFORMATIONAL: return Attribute.BLUE_TEXT();
-            case SUCCESS: return Attribute.GREEN_TEXT();
-            case REDIRECT: return Attribute.WHITE_TEXT();
-            case CLIENT_ERROR: return Attribute.MAGENTA_TEXT();
-            case SERVER_ERROR: return Attribute.RED_TEXT();
-            default: throw new NullPointerException();
-        }
-    }
-
-    private static final char LINE_CHAR = '=';
-    private static final int MIN_LINE_SIZE = 4;
-    private static final int PREFERRED_LOG_SIZE = 90;
-
-    private static String surroundWithLine(String str) {
-        int l,r;
-
-        int min = str.length() + 2 * (MIN_LINE_SIZE + 1);
-        if(min >= PREFERRED_LOG_SIZE)
-            l = r = MIN_LINE_SIZE;
-        else {
-            l = MIN_LINE_SIZE + (PREFERRED_LOG_SIZE - min) / 2;
-            r = MIN_LINE_SIZE + (PREFERRED_LOG_SIZE - min) - l;
-        }
-
-        return Utils.repeat(LINE_CHAR, l)+" "+str+" "+Utils.repeat(LINE_CHAR, r);
-    }
-
-    private interface UserCode {
-        void run() throws Exception;
     }
 }

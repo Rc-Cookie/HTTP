@@ -141,6 +141,8 @@ public final class ContentType implements JsonSerializable {
         register("text/xml", XML.description(), XML.suffixes().toArray(new String[0]));
         register("application/xml", XML.description(), XML.suffixes().toArray(new String[0])); // Set in lookup
         REMAPPING.put("text/xml", XML);
+        SUFFIX_TO_TYPE.put("vscode", ContentType.JSON);
+        SUFFIX_TO_TYPE.put("gitignore", ContentType.PLAINTEXT);
     }
 
     private final String type;

@@ -1,30 +1,24 @@
 package de.rccookie.http;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.ArrayList;
 
 import de.rccookie.util.Arguments;
-import de.rccookie.util.Utils;
 
-final class EditableMultipart implements Body.Multipart.Editable {
+final class EditableMultipart extends BufferableBody.Multipart implements Body.Multipart.Editable {
 
-    private final String boundary = Long.toHexString(System.currentTimeMillis()) + Long.toHexString(System.nanoTime());
-
-    private final Map<String, Part> parts = new LinkedHashMap<>();
-
-    @Override
-    public String boundary() {
-        return boundary;
+    EditableMultipart() {
+        super(new ArrayList<>());
     }
 
     @Override
-    public Map<String,Part> parts() {
-        return Utils.view(parts);
+    public Editable setBoundary(String boundary) {
+        this.boundary.value = Arguments.checkNull(boundary, "boundary");
+        return this;
     }
 
     @Override
     public Editable add(Part part) {
-        parts.put(Arguments.checkNull(part, "part").name(), part);
+        parts.add(Arguments.checkNull(part, "part"));
         return this;
     }
 }

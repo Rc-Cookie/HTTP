@@ -2,6 +2,7 @@ package de.rccookie.http.server;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -9,9 +10,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import de.rccookie.http.Body;
 import de.rccookie.http.ContentType;
 import de.rccookie.http.ContentTypes;
 import de.rccookie.http.HttpRequest;
+import de.rccookie.http.server.annotation.Parse;
 import de.rccookie.util.Arguments;
 import org.jetbrains.annotations.NotNull;
 
@@ -33,7 +36,7 @@ final class Parsers {
         return parser;
     }
 
-    private static Parser createParser(Class<? extends Parser> type) {
+    public static Parser createParser(Class<? extends Parser> type) {
         try {
             Constructor<? extends Parser> ctor = type.getConstructor();
             ctor.setAccessible(true);
@@ -57,14 +60,14 @@ final class Parsers {
         private final Set<Parser> supportingUnknownType = new HashSet<>();
 
         @Override
-        public <T> T parse(@NotNull HttpRequest request, @NotNull Class<T> targetType) {
+        public <T> T parse(@NotNull Body data, @NotNull Type targetType, @NotNull HttpRequest request) {
             ContentType contentType = request.contentType();
             if(contentType != null) try {
                 return parsers.stream()
                         .filter(p -> p.getMIMETypes().contains(contentType))
                         .findAny()
                         .orElseThrow(() -> HttpRequestFailure.unsupportedMediaType(contentType, mimeTypes))
-                        .parse(request, targetType);
+                        .parse(data, targetType, request);
             } catch(HttpRequestFailure f) {
                 throw f;
             } catch(Exception e) {
@@ -75,7 +78,7 @@ final class Parsers {
 
             List<RuntimeException> exceptions = new ArrayList<>();
             for(Parser parser : supportingUnknownType) try {
-                return parser.parse(request, targetType);
+                return parser.parse(data, targetType, request);
             } catch(RuntimeException e) {
                 exceptions.add(e);
             }

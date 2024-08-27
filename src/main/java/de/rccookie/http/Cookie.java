@@ -36,7 +36,7 @@ public interface Cookie extends JsonSerializable {
      * @param context The path context this cookie will be used in. Determines whether the path parameter can be left out (if it is identical)
      * @return This cookie as a string
      */
-    String toString(Path context);
+    String toString(Route context);
 
     /**
      * Converts this cookie to a valid cookie string with all parameters, as found in the
@@ -120,7 +120,7 @@ public interface Cookie extends JsonSerializable {
      * The path start this cookie belongs to. If not specified, this will be <code>"/"</code>.
      */
     @NotNull
-    Path path();
+    Route path();
 
     /**
      * Whether this cookie has the <code>secure</code> flag set, that is, it will only be
@@ -204,7 +204,7 @@ public interface Cookie extends JsonSerializable {
                 pair = getKeyValue(p);
                 switch(pair[0].toLowerCase()) {
                     case "domain": b = b.domain(pair[1]); break;
-                    case "expires": b = b.expires(Instant.from(DATE_FORMATTER.parse(pair[1]))); break;
+                    case "expires": b = b.expires(Instant.from(DATE_FORMATTER.parse(pair[1].replace('-', ' ')))); break;
                     case "max-age": b = b.maxAge(Long.parseLong(pair[1])); break;
                     case "path": b = b.path(pair[1]); break;
                     case "samesite": b = b.sameSite(SameSite.valueOf(pair[1].toUpperCase())); break;
@@ -335,11 +335,11 @@ public interface Cookie extends JsonSerializable {
         /**
          * Sets the path start that this cookie belongs to.
          *
-         * @param path The path for this cookie, or <code>null</code> to match all (<code>"/"</code>)
+         * @param route The path for this cookie, or <code>null</code> to match all (<code>"/"</code>)
          * @return The builder
          */
         @NotNull
-        Cookie.Builder path(@Nullable Path path);
+        Cookie.Builder path(@Nullable Route route);
 
         /**
          * Sets the path start that this cookie belongs to.
@@ -349,7 +349,7 @@ public interface Cookie extends JsonSerializable {
          */
         @NotNull
         default Cookie.Builder path(@Nullable String path) {
-            return path(path != null ? Path.of(path) : null);
+            return path(path != null ? Route.of(path) : null);
         }
 
         /**

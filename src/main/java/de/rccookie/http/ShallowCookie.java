@@ -20,7 +20,7 @@ final class ShallowCookie implements Cookie {
     }
 
     @Override
-    public String toString(Path context) {
+    public String toString(Route context) {
         String str = name + '=' + value;
         if(!Arguments.checkNull(context, "context").isRoot())
             str += "; Path=/";
@@ -86,8 +86,8 @@ final class ShallowCookie implements Cookie {
     }
 
     @Override
-    public @NotNull Path path() {
-        return Path.ROOT;
+    public @NotNull Route path() {
+        return Route.ROOT;
     }
 
     @NotNull

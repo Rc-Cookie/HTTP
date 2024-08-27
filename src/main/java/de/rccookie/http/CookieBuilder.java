@@ -19,7 +19,7 @@ final class CookieBuilder implements Cookie.Builder {
     boolean httpOnly = false;
     boolean partitioned = false;
     @NotNull
-    Path path = Path.ROOT;
+    Route path = Route.ROOT;
     boolean secure = false;
     @NotNull
     Cookie.SameSite sameSite = SameSite.LAX;
@@ -31,7 +31,7 @@ final class CookieBuilder implements Cookie.Builder {
     }
 
     @Override
-    public String toString(Path context) {
+    public String toString(Route context) {
         StringBuilder str = new StringBuilder();
         str.append(name).append('=').append(value);
         if(domain != null)
@@ -52,7 +52,7 @@ final class CookieBuilder implements Cookie.Builder {
 
     @Override
     public String toString() {
-        return toString(Path.ROOT);
+        return toString(Route.ROOT);
     }
 
     @Override
@@ -99,7 +99,7 @@ final class CookieBuilder implements Cookie.Builder {
     }
 
     @Override
-    public @NotNull Path path() {
+    public @NotNull Route path() {
         return path;
     }
 
@@ -150,8 +150,8 @@ final class CookieBuilder implements Cookie.Builder {
     }
 
     @Override
-    public @NotNull Cookie.Builder path(@Nullable Path path) {
-        this.path = path != null ? path : Path.ROOT;
+    public @NotNull Cookie.Builder path(@Nullable Route route) {
+        this.path = route != null ? route : Route.ROOT;
         return this;
     }
 

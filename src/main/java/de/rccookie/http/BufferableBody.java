@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.http.HttpRequest;
 import java.util.List;
 import java.util.function.Function;
 
@@ -47,6 +48,11 @@ class BufferableBody implements Body {
     }
 
     @Override
+    public HttpRequest.BodyPublisher toBodyPublisher() {
+        return HttpRequest.BodyPublishers.ofByteArray(getBuffer());
+    }
+
+    @Override
     public byte[] data() {
         return buffered ? getBuffer() : body.data();
     }
@@ -54,6 +60,14 @@ class BufferableBody implements Body {
     @Override
     public String text() {
         return buffered ? new String(getBuffer()) : body.text();
+    }
+
+    @Override
+    public Body.Multipart asMultipart() {
+        if(buffered)
+            return Body.Multipart.parse(this);
+        consumed = true;
+        return body.asMultipart();
     }
 
     @Override
@@ -136,6 +150,11 @@ class BufferableBody implements Body {
         @Override
         public Object toJson() {
             return Body.Multipart.super.toJson();
+        }
+
+        @Override
+        public Body.Multipart asMultipart() {
+            return this;
         }
     }
 }

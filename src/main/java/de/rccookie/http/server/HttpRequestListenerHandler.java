@@ -364,13 +364,10 @@ class HttpRequestListenerHandler implements HttpRequestHandler {
             parse = method.getDeclaringClass().getDeclaredAnnotation(Parse.class);
             if(parse == null) {
                 Function<? super HttpRequest.Received, ?> parser = createParser(Parser.Default.INSTANCE, type);
-                return r -> {
-                    if(!(type instanceof Class<?>))
-                        return parser.apply(r);
-                    return r.getOptionalParam((Class) type, () -> parser.apply(r));
-                };
+                if(type instanceof Class)
+                    return r -> r.getOptionalParam((Class) type, () -> parser.apply(r));
+                else return parser;
             }
-//                throw new IllegalHttpRequestListenerException(method+" parameter "+(param+1)+": illegal type, no component of http request and not annotated with @Parse, @PathVar or @QueryParam");
         }
 
         return createParser(Parsers.getParser(parse), type);

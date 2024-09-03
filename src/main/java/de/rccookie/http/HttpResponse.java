@@ -156,6 +156,16 @@ public interface HttpResponse {
     }
 
     /**
+     * Returns <code>body().asMultipart()</code> if this response has a body, otherwise <code>null</code>.
+     *
+     * @return The content of this response parsed as <code>multipart/formdata</code>, if any
+     */
+    default Body.Multipart multipart() {
+        Body body = body();
+        return body != null ? body.asMultipart() : null;
+    }
+
+    /**
      * Returns whether this request uses https or plain http.
      *
      * @return Whether this request uses https

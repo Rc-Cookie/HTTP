@@ -47,7 +47,8 @@ final class MultipartStream implements Iterator<Body.Multipart.Part> {
     public boolean hasNext() {
         if(hasNext != null) return hasNext;
         try {
-            return hasNext = Arrays.equals(in.readNBytes(startOfPart.length), startOfPart);
+            byte[] start = in.readNBytes(2);
+            return hasNext = start.length == 2 && Arrays.equals(start, 0, 2, startOfPart, 0, 2);
         } catch(IOException e) {
             throw new UncheckedException(e);
         }
@@ -58,6 +59,9 @@ final class MultipartStream implements Iterator<Body.Multipart.Part> {
         if(!hasNext()) throw new EmptyIteratorException(this);
         hasNext = null;
         try {
+            if(in.readNBytes(startOfPart.length - 2).length != startOfPart.length - 2)
+                throw new MultipartSyntaxException("Reached EOF while parsing");
+
             String header = new String(readUntil("\r\n\r\n"));
             int index = header.indexOf("\r\n");
             String contentType = null;

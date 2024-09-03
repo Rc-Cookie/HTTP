@@ -31,7 +31,7 @@ final class CookieBuilder implements Cookie.Builder {
     }
 
     @Override
-    public String toString(Route context) {
+    public String toString(@Nullable Route context) {
         StringBuilder str = new StringBuilder();
         str.append(name).append('=').append(value);
         if(domain != null)
@@ -42,7 +42,7 @@ final class CookieBuilder implements Cookie.Builder {
             str.append("; Max-Age=").append(maxAge());
         if(partitioned)
             str.append("; Partitioned");
-        if(!context.normalize().equals(path.normalize()))
+        if(context == null || !context.normalize().equals(path.normalize()))
             str.append("; Path=").append(path);
         if(secure)
             str.append("; Secure");
@@ -52,7 +52,7 @@ final class CookieBuilder implements Cookie.Builder {
 
     @Override
     public String toString() {
-        return toString(Route.ROOT);
+        return toString(null);
     }
 
     @Override

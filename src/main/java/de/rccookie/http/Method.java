@@ -1,9 +1,5 @@
 package de.rccookie.http;
 
-import de.rccookie.http.client.DefaultHostHttpClient;
-import de.rccookie.http.client.HttpClient;
-import de.rccookie.http.client.SimpleHttpClient;
-
 /**
  * HTTP request methods.
  *
@@ -13,76 +9,76 @@ public enum Method {
     /**
      * The GET method requests a representation of the specified resource. Requests using GET should only retrieve data.
      */
-    GET,
+    GET(false),
     /**
      * The POST method submits an entity to the specified resource, often causing a change in state or side effects on the server.
      */
-    POST,
+    POST(false),
     /**
      * The PUT method replaces all current representations of the target resource with the request payload.
      */
-    PUT,
+    PUT(false),
     /**
      * The HEAD method asks for a response identical to a GET request, but without the response body.
      */
-    HEAD,
+    HEAD(false),
     /**
      * The DELETE method deletes the specified resource.
      */
-    DELETE,
+    DELETE(false),
     /**
      * The CONNECT method establishes a tunnel to the server identified by the target resource.
      */
-    CONNECT,
+    CONNECT(false),
     /**
      * The OPTIONS method describes the communication options for the target resource.
      */
-    OPTIONS,
+    OPTIONS(false),
     /**
      * The TRACE method performs a message loop-back test along the path to the target resource.
      */
-    TRACE,
+    TRACE(false),
     /**
      * The PATCH method applies partial modifications to a resource.
      */
-    PATCH,
+    PATCH(false),
 
     // --- WEBDAV ---
 
     /**
      * Copy a resource from one uniform resource identifier (URI) to another.
      */
-    COPY,
+    COPY(true),
     /**
      * Put a lock on a resource. WebDAV supports both shared and exclusive locks.
      */
-    LOCK,
+    LOCK(true),
     /**
      * Create collections (also known as a directory).
      */
-    MKCOL,
+    MKCOL(true),
     /**
      * Move a resource from one URI to another.
      */
-    MOVE,
+    MOVE(true),
     /**
      * Retrieve properties, stored as XML, from a web resource. It is also overloaded
      * to allow one to retrieve the collection structure (also known as directory
      * hierarchy) of a remote system.
      */
-    PROPFIND,
+    PROPFIND(true),
     /**
      * Change and delete multiple properties on a resource in a single atomic act.
      */
-    PROPPATCH,
+    PROPPATCH(true),
     /**
      * Remove a lock from a resource.
      */
-    UNLOCK;
+    UNLOCK(true);
 
+    public final boolean isWebDAV;
 
-    public static void main(String[] args) {
-        HttpClient webdav = new SimpleHttpClient(new DefaultHostHttpClient(null, "https://cloud.vintageshop.rccookie.de/remote.php/dav/files"), r -> r.setBasicAuth("admin", "XYxmSO1QTf2tWT"));
-        System.out.println(webdav.get("/admin").setMethod(PROPFIND).send().toHttp());
+    Method(boolean isWebDAV) {
+        this.isWebDAV = isWebDAV;
     }
 }

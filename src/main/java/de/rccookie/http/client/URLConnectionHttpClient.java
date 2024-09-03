@@ -9,22 +9,25 @@ import de.rccookie.json.JsonObject;
 /**
  * A default http client implementation using the <code>java.net</code> library.
  */
-public class DefaultHttpClient implements HttpClient {
+final class URLConnectionHttpClient implements HttpClient {
 
     static {
         System.setProperty("sun.net.http.allowRestrictedHeaders", "true");
         Json.registerDeserializer(HttpClient.class, json -> {
             try {
+                String clsName = json.getString("class");
+                if(clsName.equals("DefaultHttpClient"))
+                    clsName = URLConnectionHttpClient.class.getName();
                 //noinspection unchecked
-                return json.as((Class<? extends HttpClient>) Class.forName(json.getString("class")));
+                return json.as((Class<? extends HttpClient>) Class.forName(clsName));
             } catch(ClassNotFoundException e) {
                 throw new RuntimeException(e);
             }
         });
-        Json.registerDeserializer(DefaultHttpClient.class, json -> new DefaultHttpClient());
+        Json.registerDeserializer(URLConnectionHttpClient.class, json -> (URLConnectionHttpClient) STD_NET);
     }
 
-    public DefaultHttpClient() { }
+    public URLConnectionHttpClient() { }
 
     @Override
     public HttpRequest.Unsent get(URL url) {

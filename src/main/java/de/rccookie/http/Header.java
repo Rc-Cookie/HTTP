@@ -394,7 +394,7 @@ public interface Header extends Map<String, Header.Values> {
         Values EMPTY = Values.init();
         private static Values init() {
             Json.registerDeserializer(Values.class, json -> Header.mutableValues(json.as(String[].class)));
-            return new ReadonlyHeader.ReadonlyValues(List.of());
+            return new ReadonlyHeader.ReadonlyValues(List.of(), false);
         }
     }
 
@@ -406,7 +406,7 @@ public interface Header extends Map<String, Header.Values> {
      * @return The value object
      */
     static Values values(List<? extends String> values) {
-        return new ReadonlyHeader.ReadonlyValues(values);
+        return new ReadonlyHeader.ReadonlyValues(values, true);
     }
 
     /**
@@ -489,6 +489,17 @@ public interface Header extends Map<String, Header.Values> {
      * @return A readonly header with the given values
      */
     static Header of(Map<? extends String, ? extends List<? extends String>> values) {
-        return new ReadonlyHeader(values);
+        return new ReadonlyHeader(values, true);
+    }
+
+    /**
+     * Returns an immutable header with the given values. The validity the values will not
+     * be checked.
+     *
+     * @param values The values for the header, no reference will be kept
+     * @return A readonly header with the given values
+     */
+    static Header ofReceived(Map<? extends String, ? extends List<? extends String>> values) {
+        return new ReadonlyHeader(values, false);
     }
 }

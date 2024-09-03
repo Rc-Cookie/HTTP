@@ -49,7 +49,7 @@ class ReceivedHttpRequest implements HttpRequest.Respondable {
             Console.warn("Client sent illegal request method:", connection.getRequestMethod());
             throw new HttpRequestFailure(ResponseCode.METHOD_NOT_ALLOWED, "Illegal HTTP method: "+connection.getRequestMethod(), null, e);
         }
-        header = Header.of(connection.getRequestHeaders());
+        header = Header.ofReceived(connection.getRequestHeaders());
         self = connection.getLocalAddress();
         this.body = Body.of(connection.getRequestBody());
 

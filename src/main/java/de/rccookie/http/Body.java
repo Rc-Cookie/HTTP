@@ -1,13 +1,16 @@
 package de.rccookie.http;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.SequenceInputStream;
+import java.net.http.HttpRequest;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -96,6 +99,11 @@ public interface Body extends AutoCloseable, JsonSerializable {
         }
 
         @Override
+        public HttpRequest.BodyPublisher toBodyPublisher() {
+            return HttpRequest.BodyPublishers.noBody();
+        }
+
+        @Override
         public void close() throws Exception {
             stream().close();
         }
@@ -118,6 +126,11 @@ public interface Body extends AutoCloseable, JsonSerializable {
         @Override
         public Document xml(long options) {
             return XML.parse("", options);
+        }
+
+        @Override
+        public Multipart asMultipart() {
+            throw new MultipartSyntaxException("Reached EOF while parsing");
         }
 
         @Override
@@ -148,6 +161,13 @@ public interface Body extends AutoCloseable, JsonSerializable {
      * @return An input stream over the data
      */
     InputStream stream();
+
+    /**
+     * Returns a body publisher with the contents of this body.
+     *
+     * @return A body publisher of this body
+     */
+    HttpRequest.BodyPublisher toBodyPublisher();
 
     /**
      * Returns the contents as raw bytes.
@@ -216,6 +236,14 @@ public interface Body extends AutoCloseable, JsonSerializable {
     default Document html() {
         return xml(XML.HTML);
     }
+
+    /**
+     * Returns this body (lazily) parsed as multipart body (or the body
+     * itself if it already is a multipart).
+     *
+     * @return The body parsed as <code>multipart/formdata</code>
+     */
+    Multipart asMultipart();
 
     /**
      * Marks the body to buffer its contents such that they can be
@@ -336,6 +364,11 @@ public interface Body extends AutoCloseable, JsonSerializable {
         }
 
         @Override
+        default HttpRequest.BodyPublisher toBodyPublisher() {
+            return HttpRequest.BodyPublishers.ofInputStream(this::stream);
+        }
+
+        @Override
         default void writeTo(OutputStream out) throws IOException, InterruptedException {
             byte[] boundary = ("--" + boundary()).getBytes();
             byte[] crlf = "\r\n".getBytes();
@@ -349,7 +382,7 @@ public interface Body extends AutoCloseable, JsonSerializable {
                 Json.write(part.name(), out); // Encode and enquote string
                 if(part.filename() != null) {
                     out.write(semiFilenameEquals);
-                    Json.write(part, out);
+                    Json.write(part.filename(), out);
                 }
                 if(part.contentType() != null) {
                     out.write(crlf);
@@ -401,6 +434,16 @@ public interface Body extends AutoCloseable, JsonSerializable {
         @Override
         default Document html() {
             throw new XMLParseException("Data is a multipart body, not html");
+        }
+
+        /**
+         * Returns itself.
+         *
+         * @return This multipart body
+         */
+        @Override
+        default Multipart asMultipart() {
+            return this;
         }
 
         @Override
@@ -766,8 +809,12 @@ public interface Body extends AutoCloseable, JsonSerializable {
          * Parses the given body as a multipart body. This consumes the stream of the given body, but
          * the returned body can of course be read.
          *
+         * <p>In general, calling {@link Body#asMultipart()} should be the preferred way of parsing a
+         * body as a multipart.</p>
+         *
          * @param data The data to parse. If this already is a multipart it will be returned directly
          * @return A multipart parsed from the given data
+         * @see Body#asMultipart()
          * @apiNote The data may not be parsed immediately, at least not completely, so parsing exceptions
          * may occur after this method terminates
          */
@@ -821,6 +868,22 @@ public interface Body extends AutoCloseable, JsonSerializable {
             @Override
             public InputStream stream() {
                 return stream;
+            }
+
+            @Override
+            public HttpRequest.BodyPublisher toBodyPublisher() {
+                return HttpRequest.BodyPublishers.ofInputStream(() -> stream);
+            }
+
+            @Override
+            public Multipart asMultipart() {
+                if(stream instanceof BufferedInputStream)
+                    return Multipart.parse(this);
+                // LeftOverInputStream seems to have a bug where it hangs up when reading
+                // past the end of the stream, or trying to close it, after having parsed
+                // it, but reading it directly (e.g. with data()) works fine. This seems
+                // to fix it.
+                return of(new BufferedInputStream(stream)).asMultipart();
             }
 
             @Override
@@ -880,6 +943,20 @@ public interface Body extends AutoCloseable, JsonSerializable {
             @Override
             public InputStream stream() {
                 return stream;
+            }
+
+            @Override
+            public HttpRequest.BodyPublisher toBodyPublisher() {
+                try {
+                    return HttpRequest.BodyPublishers.ofFile(file);
+                } catch (FileNotFoundException e) {
+                    throw Utils.rethrow(e);
+                }
+            }
+
+            @Override
+            public Multipart asMultipart() {
+                return Multipart.parse(this);
             }
 
             @Override
@@ -959,6 +1036,12 @@ public interface Body extends AutoCloseable, JsonSerializable {
             public synchronized String text() {
                 return str != null ? str : new String(data());
             }
+
+            @Override
+            public Multipart asMultipart() {
+                return Multipart.parse(this);
+            }
+
             @Override
             public InputStream stream() {
                 return str != null ? new StringInputStream(str) {
@@ -977,6 +1060,16 @@ public interface Body extends AutoCloseable, JsonSerializable {
                     }
                 };
             }
+
+            @Override
+            public HttpRequest.BodyPublisher toBodyPublisher() {
+                if(str != null)
+                    return HttpRequest.BodyPublishers.ofString(str);
+                else if(bytes != null)
+                    return HttpRequest.BodyPublishers.ofByteArray(bytes);
+                else throw new IllegalStateException("Body already closed, cannot read anymore");
+            }
+
             @Override
             public void close() {
                 str = null;
@@ -1115,6 +1208,11 @@ public interface Body extends AutoCloseable, JsonSerializable {
             }
 
             @Override
+            public HttpRequest.BodyPublisher toBodyPublisher() {
+                return HttpRequest.BodyPublishers.ofInputStream(this::stream);
+            }
+
+            @Override
             public byte[] data() {
                 return bytes().toByteArray();
             }
@@ -1153,6 +1251,11 @@ public interface Body extends AutoCloseable, JsonSerializable {
             @Override
             public JsonElement json() {
                 return Json.parse(stream());
+            }
+
+            @Override
+            public Multipart asMultipart() {
+                return Multipart.parse(this);
             }
 
             @Override
@@ -1217,6 +1320,11 @@ public interface Body extends AutoCloseable, JsonSerializable {
         }
 
         @Override
+        public HttpRequest.BodyPublisher toBodyPublisher() {
+            return HttpRequest.BodyPublishers.ofByteArray(data());
+        }
+
+        @Override
         public void close() {
             closed = true;
             json = null;
@@ -1257,6 +1365,11 @@ public interface Body extends AutoCloseable, JsonSerializable {
         public Document xml(long options) {
             throw new XMLParseException("Data is in JSON format");
         }
+
+        @Override
+        public Multipart asMultipart() {
+            throw new MultipartSyntaxException("Data is in JSON format");
+        }
     }
 
     class OfData implements Body {
@@ -1273,8 +1386,14 @@ public interface Body extends AutoCloseable, JsonSerializable {
 
         @Override
         public synchronized byte[] data() {
-            if(data == null) throw new IllegalStateException("Body has been closed");
+            if(data == null)
+                throw new IllegalStateException("Body has been closed");
             return data;
+        }
+
+        @Override
+        public Multipart asMultipart() {
+            return Multipart.parse(this);
         }
 
         @Override
@@ -1286,6 +1405,11 @@ public interface Body extends AutoCloseable, JsonSerializable {
                     super.close();
                 }
             };
+        }
+
+        @Override
+        public HttpRequest.BodyPublisher toBodyPublisher() {
+            return HttpRequest.BodyPublishers.ofByteArray(data());
         }
 
         @Override

@@ -409,6 +409,16 @@ public interface HttpRequest extends JsonSerializable {
     }
 
     /**
+     * Returns <code>body().asMultipart()</code> if this request has a body, otherwise <code>null</code>.
+     *
+     * @return The content of this request parsed as <code>multipart/formdata</code>, if any
+     */
+    default Body.Multipart multipart() {
+        Body body = body();
+        return body != null ? body.asMultipart() : null;
+    }
+
+    /**
      * Returns the sender's ip address.
      *
      * @return The ip address of the client

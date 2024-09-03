@@ -34,9 +34,9 @@ final class ReadonlyHeader implements Header {
     private List<AuthChallenge> wwwAuthenticate = null;
     private List<AuthChallenge> proxyAuthenticate = null;
 
-    ReadonlyHeader(@NotNull Map<? extends String, ? extends List<? extends String>> map) {
+    ReadonlyHeader(@NotNull Map<? extends String, ? extends List<? extends String>> map, boolean checkValues) {
         data = new HashMap<>(map.size());
-        map.forEach((k,v) -> { if(k != null) data.put(Header.normalizeKey(k), new ReadonlyValues(v)); });
+        map.forEach((k,v) -> { if(k != null) data.put(Header.normalizeKey(k), new ReadonlyValues(v, checkValues)); });
     }
 
     @Override
@@ -208,15 +208,16 @@ final class ReadonlyHeader implements Header {
 
         private final List<String> data;
 
-        ReadonlyValues(List<? extends String> data) {
+        ReadonlyValues(List<? extends String> data, boolean check) {
             this.data = new ArrayList<>(data);
-            for(String v : data)
-                if(!PATTERN.matcher(v).matches())
-                    throw new IllegalArgumentException("Illegal header value: " + v);
+            if(check)
+                for(String v : data)
+                    if(!PATTERN.matcher(v).matches())
+                        throw new IllegalArgumentException("Illegal header value: " + v);
         }
 
         ReadonlyValues(String... values) {
-            this(values.length == 0 ? List.of() : List.of(values));
+            this(values.length == 0 ? List.of() : List.of(values), true);
         }
 
         @Override

@@ -33,7 +33,7 @@ public final class Route implements CharSequence, Iterable<String>, JsonSerializ
 
     @Override
     public int length() {
-        return names.size();
+        return toString().length();
     }
 
     @Override

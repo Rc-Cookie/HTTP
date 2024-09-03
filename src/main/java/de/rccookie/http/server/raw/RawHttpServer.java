@@ -279,7 +279,7 @@ public abstract class RawHttpServer {
                     new URL(url),
                     versionStr.substring(5),
                     methodObj,
-                    Header.of(header),
+                    Header.ofReceived(header),
                     body,
                     new InetSocketAddress(client.getInetAddress(), client.getPort()),
                     new InetSocketAddress(client.getLocalAddress(), client.getLocalPort())

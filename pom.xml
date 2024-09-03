@@ -6,7 +6,7 @@
 
   <groupId>de.rccookie</groupId>
   <artifactId>http</artifactId>
-  <version>1.35.7</version>
+  <version>1.36.9</version>
 
   <properties>
     <maven.compiler.source>11</maven.compiler.source>
@@ -24,17 +24,17 @@
     <dependency>
       <groupId>de.rccookie</groupId>
       <artifactId>xml</artifactId>
-      <version>0.1.17.4</version>
+      <version>0.1.17.5</version>
     </dependency>
     <dependency>
       <groupId>de.rccookie</groupId>
       <artifactId>util</artifactId>
-      <version>1.20.18.1</version>
+      <version>1.20.19.0</version>
     </dependency>
     <dependency>
       <groupId>de.rccookie</groupId>
       <artifactId>json</artifactId>
-      <version>6.5.2</version>
+      <version>6.6.0</version>
     </dependency>
   </dependencies>
 

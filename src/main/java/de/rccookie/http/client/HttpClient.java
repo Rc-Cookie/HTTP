@@ -1,5 +1,6 @@
 package de.rccookie.http.client;
 
+import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 
@@ -14,9 +15,15 @@ import de.rccookie.util.UncheckedException;
 public interface HttpClient extends JsonSerializable {
 
     /**
-     * The default http client for sending requests via the <code>java.net</code> library.
+     * Sets requests via the <code>java.net</code> library using {@link HttpURLConnection}.
+     * Only supports HTTP 1.1 and not all request methods.
      */
-    HttpClient STD_NET = new DefaultHttpClient();
+    HttpClient STD_NET = new URLConnectionHttpClient();
+    /**
+     * Sends requests using the <code>java.net.http</code> library. Might be slightly slower
+     * than {@link #STD_NET}, but supports HTTP 2 and all request methods except CONNECT.
+     */
+    HttpClient STD_NET_HTTP = new NetHttpHttpClient();
     /**
      * A http client that wraps the current default http client and calls
      * {@link HttpRequest.Unsent#expectSuccess()} on every request.
